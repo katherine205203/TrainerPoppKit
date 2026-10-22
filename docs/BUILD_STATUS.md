@@ -8,7 +8,7 @@ Last updated: 2026-10-22
 | Milestone | Status | Evidence |
 |---|---|---|
 | M0. Environment and integrity review | Done | Safely extracted all 33 archive entries after rejecting unsafe paths and checking collisions. Preserved the existing Style Guide PDF and ZIP. Read `AGENTS.md`, `START_HERE.md`, `CODEX_AUTOBUILD_PROMPT.md`, and every Markdown file in `docs/`; visually reviewed all six Style Guide pages and all 15 approved UI PNGs. |
-| M1. React/Vite/Cloudflare scaffold | Done | React 19, TypeScript, Vite, React Router, Cloudflare Vite plugin, Workers and D1 configuration are in place. `git init` succeeded. Dependencies are installed. `npm run build` succeeds. |
+| M1. React/Vite/Cloudflare scaffold | Done | React 19, TypeScript, Vite, React Router, Cloudflare Vite plugin, Workers and D1 configuration are in place. `git init` succeeded; baseline commit `bc133ce` is clean. Dependencies are installed. `npm run build` succeeds. |
 | M2. Popp! design foundation | Done | Responsive electric-blue trainer rail, warm canvas, custom SVG mascot/brand elements, cards, badges, accessible controls, and mobile-first participant styles implemented. |
 | M3. Trainer screens | Done | Home, tools, tool detail, sessions, session detail, create/edit session, activity setup, live facilitation, archive, analytics, presenter console, and settings routes implemented. Session edits load and save through the owner API. |
 | M4. Participant screens | Done | Join, participant details, assessment runner, saved draft, completion/waiting/personal result, and public presenter experiences implemented. |
@@ -37,8 +37,8 @@ Last updated: 2026-10-22
 
 ## Remote deployment status
 
-- `wrangler whoami` initially reported unauthenticated. Wrangler’s normal login flow returned `request_forbidden` because no CSRF session cookie was available. A device authorization flow is now pending for the user in the Codex terminal; remote D1 creation, production secrets, and deploy remain gated on that sign-in.
-- `gh` was not installed at initial inspection. No GitHub repository has been created. The local Git repository is initialized, but no commits or remote are configured yet.
+- `wrangler whoami` initially reported unauthenticated. Wrangler’s normal login flow returned `request_forbidden` because no CSRF session cookie was available. The first device flow timed out; a fresh device authorization is pending in the Codex terminal for the user to complete. Remote D1 creation, production secrets, and deploy remain gated on that sign-in.
+- `gh` and Homebrew were unavailable. No GitHub repository has been created. The local Git repository is initialized with baseline commit `bc133ce`; no remote is configured.
 - The free `workers.dev` deployment remains authorized once Cloudflare login succeeds. Then create a new remote D1 database, replace the placeholder database ID, apply migrations non-destructively, set production `OWNER_PASSWORD` and `SESSION_SECRET` through Wrangler secret input without logging values, deploy, and smoke-check public health plus owner protection.
 
 ## Resume checklist
