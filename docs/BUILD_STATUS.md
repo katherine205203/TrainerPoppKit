@@ -37,13 +37,13 @@ Last updated: 2026-10-22
 
 ## Remote deployment status
 
-- `wrangler whoami` initially reported unauthenticated. Wrangler’s normal login flow returned `request_forbidden` because no CSRF session cookie was available. The first device flow timed out; a fresh device authorization is pending in the Codex terminal for the user to complete. Remote D1 creation, production secrets, and deploy remain gated on that sign-in.
+- `wrangler whoami` initially reported unauthenticated. Wrangler’s normal login flow returned `request_forbidden` because no CSRF session cookie was available. Both device authorization attempts timed out after five minutes without completion, so no active login code remains. Remote D1 creation, production secrets, and deploy remain gated on Cloudflare sign-in.
 - `gh` and Homebrew were unavailable. No GitHub repository has been created. The local Git repository is initialized with baseline commit `bc133ce`; no remote is configured.
 - The free `workers.dev` deployment remains authorized once Cloudflare login succeeds. Then create a new remote D1 database, replace the placeholder database ID, apply migrations non-destructively, set production `OWNER_PASSWORD` and `SESSION_SECRET` through Wrangler secret input without logging values, deploy, and smoke-check public health plus owner protection.
 
 ## Resume checklist
 
-1. Complete the pending Wrangler device login in the browser and rerun `npm exec wrangler -- whoami`.
+1. Run `npm exec wrangler -- login --device` and complete Cloudflare’s device verification within five minutes, then rerun `npm exec wrangler -- whoami`.
 2. Create a new remote D1 database named `trainerpopp-kit`; update `wrangler.jsonc` with its returned ID.
 3. Apply remote migrations only to that newly created database.
 4. Set production owner secrets without displaying them, then deploy to the free `workers.dev` address.
