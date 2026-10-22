@@ -1,0 +1,48 @@
+{
+  "name": "trainerpopp-kit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "WRANGLER_WRITE_LOGS=false vite --host 127.0.0.1 --port 8787",
+    "build": "WRANGLER_WRITE_LOGS=false vite build",
+    "preview": "WRANGLER_WRITE_LOGS=false vite preview --host 127.0.0.1",
+    "test": "vitest run --config vitest.config.ts",
+    "test:watch": "vitest",
+    "local:setup": "node scripts/setup-local.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "lint": "eslint .",
+    "db:migrate": "WRANGLER_WRITE_LOGS=false wrangler d1 migrations apply trainerpopp-kit --local",
+    "deploy": "WRANGLER_WRITE_LOGS=false vite build && WRANGLER_WRITE_LOGS=false wrangler deploy"
+  },
+  "dependencies": {
+    "lucide-react": "^1.61.0",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.64.0",
+    "@cloudflare/workers-types": "^5.20261022.1",
+    "@eslint/js": "^10.0.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "eslint": "^10.13.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.13.0",
+    "jsdom": "^30.1.3",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.0",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.151.3"
+  }
+}

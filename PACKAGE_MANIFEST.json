@@ -1,0 +1,20 @@
+{
+  "project": "TrainerPopp!Kit",
+  "version": "1.0",
+  "date": "2026-10-22",
+  "files_bytes": {
+    "AGENTS.md": 4288,
+    "README.md": 2758,
+    "assets/Reference_Concept_A_Bold_Playful.png": 1671514,
+    "assets/Reference_Concept_B_Editorial.png": 1744868,
+    "assets/Reference_Concept_C_Gallery.png": 1641563,
+    "assets/TrainerPoppKit_StyleGuide_Reference.pdf": 2012250,
+    "docs/ARCHITECTURE.md": 5791,
+    "docs/DECISIONS.md": 3987,
+    "docs/DESIGN_SYSTEM.md": 6571,
+    "docs/PRODUCT.md": 5217,
+    "docs/ROADMAP.md": 3622,
+    "docs/SCARF_SPEC.md": 4936,
+    "docs/UX_FLOWS.md": 4383
+  }
+}
