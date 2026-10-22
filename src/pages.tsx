@@ -4,8 +4,8 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from "reac
 import { ArrowRight, BarChart3, CalendarDays, Check, ChevronRight, Clock3, Copy, Flower, Lightbulb, Link2, LockKeyhole, Pause, Play, Plus, Radio, Search, Sparkles, Users } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { api, post } from "./api";
-import { Badge, BrandMark, Button, Card, ColorDot, DemoNotice, EmptyState, ErrorState, LoadingState, Mascot, MetricCard, PageIntro, SCARF_COLORS } from "./components";
-import { DEMO_ITEMS, relativeTier, SCARF_DIMENSIONS, smallGroupWarning, type ScarfDimension } from "./domain/scarf";
+import { Badge, BrandMark, Button, Card, ColorDot, DemoNotice, EmptyState, ErrorState, LoadingState, Mascot, MetricCard, PageIntro } from "./components";
+import { DEMO_ITEMS, relativeTier, SCARF_COLORS, SCARF_DIMENSIONS, smallGroupWarning, type ScarfDimension } from "./domain/scarf";
 
 type Session = { id: string; name: string; description: string; starts_at?: string | null; location?: string; expected_participants?: number; status: string; activity_count?: number; participant_count?: number };
 type Team = { id: string; name: string };
@@ -426,19 +426,34 @@ type JoinLookup = { activity: { id: string; title: string; sessionName?: string 
 export function JoinPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const [entryMode, setEntryMode] = useState<"code" | "link">("code");
   const [pin, setPin] = useState((params.get("pin") ?? "").replace(/\D/g, "").slice(0, 6));
+  const [trainerLink, setTrainerLink] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   async function find(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPending(true); setError("");
+    let joinPin = pin;
+    if (entryMode === "link") {
+      try {
+        const link = new URL(trainerLink.trim(), window.location.origin);
+        const pathPin = link.pathname.match(/\/join\/(\d{6})(?:\/info)?\/?$/)?.[1];
+        joinPin = link.searchParams.get("pin") ?? pathPin ?? "";
+      } catch { joinPin = ""; }
+      if (!/^\d{6}$/.test(joinPin)) {
+        setError("Paste a trainer link that includes a six-digit activity code.");
+        setPending(false);
+        return;
+      }
+    }
     try {
-      await post<JoinLookup>("/join/lookup", { pin });
-      sessionStorage.setItem("popp-join-pin", pin);
-      navigate(`/join/${pin}/info`);
+      await post<JoinLookup>("/join/lookup", { pin: joinPin });
+      sessionStorage.setItem("popp-join-pin", joinPin);
+      navigate(`/join/${joinPin}/info`);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "That activity could not be found."); }
     finally { setPending(false); }
   }
-  return <main className="participant-page join-page"><div className="participant-brand"><BrandMark /></div><section className="join-hero"><span className="eyebrow">NO ACCOUNT NEEDED</span><h1>Join an<br />activity<span className="title-dot">.</span></h1><p>Enter the six-digit code from your trainer, or open the QR link they shared with you.</p><div className="join-mascot"><Mascot kind="flower" /><span className="join-spark">✦</span></div></section><form className="join-code-card" onSubmit={find}><div className="join-mode-tabs"><span className="join-mode-active"><KeypadIcon />Enter code</span><span><Link2 size={19} />Open trainer link</span></div><label className="field-label" htmlFor="join-pin">Activity code</label><input id="join-pin" className="pin-input" aria-label="Six-digit activity code" inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" maxLength={6} placeholder="000 000" value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))} required />{error && <div className="inline-error" role="alert">{error}</div>}<Button type="submit" disabled={pending || pin.length !== 6} className="full-width">{pending ? "Checking code…" : "Join activity"}</Button><span className="join-help">Ask your trainer if you need the code.</span></form><div className="participant-bottom-note"><LockKeyhole size={16} /> Temporary guest access · No sign-up or app download</div></main>;
+  return <main className="participant-page join-page"><div className="participant-brand"><BrandMark /></div><section className="join-hero"><span className="eyebrow">NO ACCOUNT NEEDED</span><h1>Join an<br />activity<span className="title-dot">.</span></h1><p>Enter the six-digit code from your trainer, or open the QR link they shared with you.</p><div className="join-mascot"><Mascot kind="flower" /><span className="join-spark">✦</span></div></section><form className="join-code-card" onSubmit={find}><div className="join-mode-tabs"><button type="button" className={entryMode === "code" ? "join-mode-active" : ""} onClick={() => { setEntryMode("code"); setError(""); }}><KeypadIcon />Enter code</button><button type="button" className={entryMode === "link" ? "join-mode-active" : ""} onClick={() => { setEntryMode("link"); setError(""); }}><Link2 size={19} />Open trainer link</button></div>{entryMode === "code" ? <><label className="field-label" htmlFor="join-pin">Activity code</label><input id="join-pin" className="pin-input" aria-label="Six-digit activity code" inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" maxLength={6} placeholder="000 000" value={pin} onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 6))} required /></> : <><label className="field-label" htmlFor="trainer-link">Trainer link</label><input id="trainer-link" className="text-input participant-input" type="url" inputMode="url" placeholder="https://…/join?pin=123456" value={trainerLink} onChange={(event) => setTrainerLink(event.target.value)} required /><span className="join-help">Paste the link shared by your trainer. We’ll check its activity code.</span></>}{error && <div className="inline-error" role="alert">{error}</div>}<Button type="submit" disabled={pending || (entryMode === "code" ? pin.length !== 6 : !trainerLink.trim())} className="full-width">{pending ? "Checking code…" : entryMode === "code" ? "Join activity" : "Continue with link"}</Button>{entryMode === "code" && <span className="join-help">Ask your trainer if you need the code.</span>}</form><div className="participant-bottom-note"><LockKeyhole size={16} /> Temporary guest access · No sign-up or app download</div></main>;
 }
 
 function KeypadIcon() { return <span className="keypad-icon" aria-hidden="true">▦</span>; }

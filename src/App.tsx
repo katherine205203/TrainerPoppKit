@@ -1,24 +1,17 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   Archive, BookOpen, CalendarDays, CircleHelp, Home, LogOut, Menu, Radio, Search, Settings, X,
 } from "lucide-react";
 import { api, post } from "./api";
+import { AuthProvider } from "./AuthProvider";
+import { useAuth } from "./auth-context";
 import { BrandMark, Button, ErrorState, LoadingState, Mascot } from "./components";
 import {
   ActivitySetupPage, ActivityLivePage, ActivityResultPage, CreateSessionPage, HomePage,
   JoinPage, ParticipantInfoPage, ParticipantRunnerPage, ParticipantDonePage, PresenterConsolePage,
   PublicPresenterPage, ScarfDetailPage, SessionDetailPage, SessionsPage, ToolsPage, ArchivePage,
 } from "./pages";
-
-type AuthContextValue = { authenticated: boolean; refresh: () => Promise<void>; signOut: () => Promise<void> };
-const AuthContext = createContext<AuthContextValue | null>(null);
-
-export function useAuth(): AuthContextValue {
-  const value = useContext(AuthContext);
-  if (!value) throw new Error("useAuth must be used inside the app.");
-  return value;
-}
 
 function LoginPage() {
   const { refresh } = useAuth();
@@ -148,40 +141,5 @@ function NotFoundPage() {
 }
 
 export default function App() {
-  const [authLoaded, setAuthLoaded] = useState(false);
-  const [authenticated, setAuthenticated] = useState(false);
-  const location = useLocation();
-
-  async function refresh() {
-    try {
-      const result = await api<{ authenticated: boolean }>("/auth/me");
-      setAuthenticated(result.authenticated);
-    } catch {
-      setAuthenticated(false);
-    } finally {
-      setAuthLoaded(true);
-    }
-  }
-
-  async function signOut() {
-    try { await post("/auth/logout"); } finally { setAuthenticated(false); }
-  }
-
-  useEffect(() => {
-    let active = true;
-    api<{ authenticated: boolean }>("/auth/me").then((result) => {
-      if (active) setAuthenticated(result.authenticated);
-    }).catch(() => {
-      if (active) setAuthenticated(false);
-    }).finally(() => {
-      if (active) setAuthLoaded(true);
-    });
-    return () => { active = false; };
-  }, [location.pathname]);
-  const authValue = useMemo(() => ({ authenticated, refresh, signOut }), [authenticated]);
-
-  if (!authLoaded && !["/join", "/presenter"].some((path) => location.pathname.startsWith(path)) && !location.pathname.startsWith("/participate")) {
-    return <LoadingState label="Opening your trainer space…" />;
-  }
-  return <AuthContext.Provider value={authValue}><AppRoutes /></AuthContext.Provider>;
+  return <AuthProvider><AppRoutes /></AuthProvider>;
 }

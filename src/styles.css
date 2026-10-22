@@ -565,8 +565,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .join-spark { position: absolute; top: 5px; right: 25px; color: var(--brand-gold); font-size: 53px; }
 .join-code-card { display: grid; gap: 13px; border: 1px solid #e9e5df; border-radius: 23px; padding: 22px; background: #fff; box-shadow: 0 8px 30px rgb(41 35 68 / 5%); }
 .join-mode-tabs { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #e3e2e8; border-radius: 999px; padding: 3px; }
-.join-mode-tabs span { display: flex; min-height: 40px; align-items: center; justify-content: center; gap: 8px; border-radius: 999px; color: #535566; font-size: 11px; font-weight: 800; }
+.join-mode-tabs button { display: flex; min-height: 40px; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 999px; background: transparent; color: #535566; font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
 .join-mode-tabs .join-mode-active { color: #fff; background: var(--brand-electric); }
+.join-mode-tabs button:focus-visible { outline: 3px solid var(--brand-orange); outline-offset: 2px; }
 .keypad-icon { font-size: 19px; }
 .pin-input { width: 100%; min-height: 83px; border: 1px solid #dedce5; border-radius: 14px; padding: 8px; color: #161622; background: #fff; font-size: 38px; font-weight: 800; letter-spacing: 9px; text-align: center; }
 .pin-input::placeholder { color: #d0cfda; }

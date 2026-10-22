@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Check, CircleAlert, LoaderCircle, Sparkles } from "lucide-react";
+import { ArrowRight, CircleAlert, LoaderCircle, Sparkles } from "lucide-react";
 
 export function BrandMark({ product = true }: { product?: boolean }) {
   return (
@@ -80,6 +80,3 @@ export function DemoNotice({ compact = false }: { compact?: boolean }) {
 export function ColorDot({ color, className = "" }: { color: string; className?: string }) {
   return <span aria-hidden="true" className={`color-dot ${className}`} style={{ backgroundColor: color }} />;
 }
-
-export const SCARF_COLORS = ["#ff5b22", "#aee6ed", "#3939ff", "#ff6bcb", "#c98cff"];
-export const CHECK_ICON = <Check size={16} />;

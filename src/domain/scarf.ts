@@ -6,6 +6,8 @@ export const SCARF_DIMENSIONS = [
   "Fairness",
 ] as const;
 
+export const SCARF_COLORS = ["#ff5b22", "#aee6ed", "#3939ff", "#ff6bcb", "#c98cff"] as const;
+
 export type ScarfDimension = (typeof SCARF_DIMENSIONS)[number];
 export type DemoAnswers = Record<number, number>;
 export type DemoScores = Record<ScarfDimension, number>;
