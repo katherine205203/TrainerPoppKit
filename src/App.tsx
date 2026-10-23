@@ -88,6 +88,8 @@ function OwnerLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const isSessionList = location.pathname === "/sessions";
+  const isToolWorkspace = location.pathname.startsWith("/tools/")
+    || /^\/(?:activities\/(?:new|[^/]+\/(?:live|presenter))|results\/[^/]+|polls(?:\/|$)|wordclouds(?:\/|$)|reflection-walls(?:\/|$)|learning-behaviors(?:\/|$))/.test(location.pathname);
 
   function search(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,9 +108,9 @@ function OwnerLayout() {
       <div className="sidebar-bottom"><button type="button" className="side-link side-action" onClick={() => navigate("/settings")}><Settings size={20} /><span>Settings</span></button><button type="button" className="trainer-chip" onClick={() => void signOut()}><span className="trainer-avatar"><Mascot kind="bean" /></span><span><strong>My Trainer Space</strong><small>Owner account</small></span><LogOut size={17} /></button></div>
     </aside>
     <div className="main-column">
-      <header className="topbar"><button className="mobile-menu" aria-label={mobileOpen ? "Close menu" : "Open menu"} onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button>
-        <form className="top-search" onSubmit={search}><Search size={15} /><input aria-label="Search tools" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tools, sessions, or anything…" /></form>
-        <div className="topbar-actions">{isSessionList ? <Button variant="orange" to="/sessions/new" icon={<Plus size={14} />}>Create session</Button> : <Button variant="orange" to="/activities/new" icon={<Plus size={14} />}>Create activity</Button>}<button className="help-button" title="Help and guidance" onClick={() => window.alert("TrainerPopp!Kit is a personal facilitation workspace. Participant results stay private until you reveal them.")}><Bell size={15} /><span className="help-dot" /></button></div>
+      <header className={`topbar ${isToolWorkspace ? "topbar-focused" : ""}`}><button className="mobile-menu" aria-label={mobileOpen ? "Close menu" : "Open menu"} onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button>
+        {!isToolWorkspace && <form className="top-search" onSubmit={search}><Search size={15} /><input aria-label="Search tools" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tools, sessions, or anything…" /></form>}
+        <div className="topbar-actions">{!isToolWorkspace && (isSessionList ? <Button variant="orange" to="/sessions/new" icon={<Plus size={14} />}>Create session</Button> : <Button variant="orange" to="/activities/new" icon={<Plus size={14} />}>Create activity</Button>)}<button className="help-button" title="Help and guidance" onClick={() => window.alert("TrainerPopp!Kit is a personal facilitation workspace. Participant results stay private until you reveal them.")}><Bell size={15} /><span className="help-dot" /></button></div>
       </header>
       <main className="owner-content"><Outlet /></main>
     </div>
@@ -198,7 +200,7 @@ function ActivityLiveIndex() {
 }
 
 function SettingsPage() {
-  return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">YOUR WORKSPACE</span><h1>Settings<span className="title-dot">.</span></h1><p>Personal trainer workspace and privacy defaults.</p></div></div><section className="card settings-card"><h2>Owner access</h2><p>Owner routes are protected by a signed, HTTP-only session cookie. Configure your password and signing secret as Worker secrets before deployment.</p><div className="setting-row"><span><strong>Participant access</strong><small>Temporary, activity-scoped guest tokens</small></span><span className="setting-status">Enabled for open activities</span></div><div className="setting-row"><span><strong>Presenter privacy</strong><small>SCARF and Word Cloud presenter screens contain aggregate data only</small></span><span className="setting-status">Word Cloud has no minimum group size</span></div><div className="setting-row"><span><strong>SCARF module</strong><small>Question bank v0.2 · Experimental and not validated</small></span><span className="setting-status status-demo">EXPERIMENTAL</span></div><div className="setting-row"><span><strong>Word Cloud</strong><small>Anonymous response aggregation · contextual privacy risk in very small teams</small></span><span className="setting-status">Available</span></div></section></div>;
+  return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">YOUR WORKSPACE</span><h1>Settings<span className="title-dot">.</span></h1><p>Personal trainer workspace and privacy defaults.</p></div></div><section className="card settings-card"><h2>Owner access</h2><p>Owner routes are protected by a signed, HTTP-only session cookie. Configure your password and signing secret as Worker secrets before deployment.</p><div className="setting-row"><span><strong>Participant access</strong><small>Temporary, activity-scoped guest tokens</small></span><span className="setting-status">Enabled for open activities</span></div><div className="setting-row"><span><strong>Presenter privacy</strong><small>SCARF and Word Cloud presenter screens contain aggregate data only</small></span><span className="setting-status">Word Cloud has no minimum group size</span></div><div className="setting-row"><span><strong>SCARF module</strong><small>Question bank v0.2 · Experimental and not validated</small></span><small className="setting-note">Unvalidated self-reflection tool</small></div><div className="setting-row"><span><strong>Word Cloud</strong><small>Anonymous response aggregation · contextual privacy risk in very small teams</small></span><span className="setting-status">Available</span></div></section></div>;
 }
 
 function NotFoundPage() {

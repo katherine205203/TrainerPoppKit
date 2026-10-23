@@ -2,6 +2,8 @@
 
 **As of 2026-10-23:** The single-owner Cloudflare app includes Reflection Wall v1.0, SCARF Assessment with v1.1 scoring, Poll v1.2, Word Cloud v1.0, and Learning Behaviors Reflection v1.0. SCARF uses the v0.2 question bank and remains experimental/unvalidated. Production health returns 200, its public client bundle contains LBR, and the remote D1 migration list has no pending migrations. Authenticated production trainer and six-person participant UAT remain unverified.
 
+**UI consistency follow-up (2026-10-23):** SCARF detail/setup/results no longer use experimental status badges; the setup and results keep a compact plain-text instrument limitation disclosure. Tool-focused routes hide the global search/create controls. The SCARF result-release choices now use compact, responsive selection cards with readable helper text, and the Word Cloud editor removes its promotional privacy panel and wraps long question previews within the card.
+
 ## Phase 01 — Design system integration
 - B01a: Brand rename and design tokens/components (`TrainerPopp!Kit` rather than legacy name in PDF).
 - B01b: Desktop owner layout, guest mobile shell, projector-safe presenter shell with empty/loading/error states.

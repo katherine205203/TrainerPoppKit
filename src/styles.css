@@ -445,8 +445,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .form-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(270px, .8fr); align-items: start; gap: 17px; }
 .form-card { display: grid; gap: 11px; padding: 22px; }
 .form-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; color: #353542; font-size: 12px; font-weight: 800; }
-.form-section-heading small { color: #858697; font-size: 10px; font-weight: 500; }
-.field-label { display: block; margin: 4px 0 -5px; color: #333440; font-size: 11px; font-weight: 800; }
+.form-section-heading small { color: #858697; font-size: 12px; font-weight: 500; }
+.field-label { display: block; margin: 4px 0 -5px; color: #333440; font-size: 12px; font-weight: 800; }
 .field-label b { color: var(--brand-orange); }
 .field-label small { color: #77798b; font-size: 10px; font-weight: 500; }
 .text-input { width: 100%; min-height: 43px; border: 1px solid #dedde4; border-radius: 12px; padding: 0 13px; color: #292936; background: #fff; font-size: 12px; }
@@ -513,8 +513,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .select-static strong { font-size: 10px; }
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
 .switch-row > span { display: grid; gap: 4px; }
-.switch-row strong { font-size: 11px; }
-.switch-row small { color: #77798a; font-size: 9px; line-height: 1.45; }
+.switch-row strong { font-size: 13px; }
+.switch-row small { color: #77798a; font-size: 12px; line-height: 1.5; }
 .switch-row input { position: absolute; opacity: 0; pointer-events: none; }
 .switch-row i { position: relative; width: 42px; height: 24px; flex: none; border-radius: 99px; background: #d4d4dc; transition: background .15s ease; }
 .switch-row i::after { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; content: ""; transition: transform .15s ease; }
@@ -536,17 +536,25 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .ready-card h2 { position: relative; z-index: 1; margin: 8px 0 0; font-size: 20px; letter-spacing: -.7px; }
 .ready-card .mascot { position: absolute; right: 14px; bottom: -14px; width: 80px; height: 80px; color: #fff; }
 .radio-list { display: grid; gap: 7px; }
-.radio-card { display: flex; align-items: center; gap: 9px; border: 1px solid #e7e5e8; border-radius: 12px; padding: 11px; background: #faf9f7; cursor: pointer; }
-.radio-card input { accent-color: var(--brand-electric); }
-.radio-card > span { display: grid; flex: 1; gap: 4px; }
-.radio-card strong { font-size: 10px; }
-.radio-card small { color: #77798a; font-size: 9px; }
+.radio-card { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 11px; min-width: 0; border: 1px solid #e7e5e8; border-radius: 14px; padding: 14px 15px; background: #faf9f7; cursor: pointer; }
+.radio-card input { width: 17px; height: 17px; margin: 0; accent-color: var(--brand-electric); }
+.radio-card > span { display: grid; min-width: 0; gap: 4px; }
+.radio-card strong { font-size: 13px; line-height: 1.35; }
+.radio-card small { color: #77798a; font-size: 12px; line-height: 1.45; }
+.radio-card:focus-within { outline: 3px solid #ff9c49; outline-offset: 2px; }
 .radio-selected { border-color: var(--brand-electric); background: #f5f4ff; }
 .privacy-callout, .privacy-card { display: flex; align-items: flex-start; gap: 9px; border-radius: 12px; padding: 11px; color: #58586d; background: #f1edff; font-size: 9px; line-height: 1.5; }
 .privacy-callout svg, .privacy-card > svg { flex: none; color: var(--brand-electric); }
 .info-card { display: flex; align-items: flex-start; gap: 9px; color: #235a5e; background: #d7f5f4; }
 .info-card svg { flex: none; margin-top: 1px; }
 .info-card p { margin: 0; font-size: 10px; line-height: 1.5; }
+.release-card { gap: 10px; }
+.release-card h3 { margin: 0; color: #292936; font-size: 22px; letter-spacing: -.55px; }
+.release-heading-help { margin: 0 0 1px; color: #555667; font-size: 14px; font-weight: 700; line-height: 1.4; }
+.release-card .radio-list { gap: 9px; }
+.release-privacy-note { margin: 2px 0 0; color: #66677a; font-size: 12px; line-height: 1.55; }
+.scarf-status-note { margin: 0; color: #727385; font-size: 11px; line-height: 1.5; }
+.setting-note { color: #77798a; font-size: 11px; line-height: 1.45; text-align: right; }
 .setup-submit { display: flex; justify-content: flex-end; gap: 8px; }
 .setup-submit-button { min-width: 170px; }
 .inline-error { border: 1px solid #f2c7c2; border-radius: 11px; padding: 10px 12px; font-size: 11px; line-height: 1.5; }
@@ -2186,15 +2194,15 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .wc-draft-choice span { display: grid; gap: 3px; }
 .wc-draft-choice small { color: #777789; }
 .wc-form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 9px; }
-.wc-editor-aside { display: grid; gap: 14px; }
+.wc-editor-aside { display: grid; min-width: 0; gap: 14px; }
 .wc-editor-aside > .card { padding: 23px; }
 .wc-aside-icon { display: grid; place-items: center; width: 46px; height: 46px; margin-bottom: 18px; border-radius: 15px; color: #3939ff; background: #eeeefe; }
 .wc-editor-aside h2 { margin: 8px 0; font-size: 22px; }
 .wc-editor-aside p, .wc-editor-aside li { color: #717182; line-height: 1.5; }
 .wc-editor-aside ul { display: grid; gap: 8px; padding-left: 20px; font-size: 13px; }
-.wc-preview-card { padding: 19px; border-radius: 18px; color: #fff; background: #ff5b22; }
+.wc-preview-card { min-width: 0; overflow: hidden; padding: 19px; border-radius: 18px; color: #fff; background: #ff5b22; }
 .wc-preview-card > span { font-size: 10px; font-weight: 800; letter-spacing: 1.2px; }
-.wc-preview-card h3 { font-size: 22px; line-height: 1.2; }
+.wc-preview-card h3 { max-width: 100%; overflow-wrap: anywhere; word-break: break-word; font-size: 22px; line-height: 1.2; }
 .wc-preview-card small { color: #fff4ee; }
 .wc-control-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .wc-control-heading h1 { margin: 4px 0 6px; font-size: clamp(32px, 4vw, 46px); letter-spacing: -1.7px; }
