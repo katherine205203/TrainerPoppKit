@@ -4,7 +4,7 @@ import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-r
 import { ArrowLeft, ArrowRight, Check, CircleHelp, Copy, Download, FlaskConical, Hand, Heart, LockKeyhole, MessageCircle, Play, Plus, Radio, Users } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { api, post } from "./api";
-import { Badge, BrandMark, Button, Card, EmptyState, ErrorState, LoadingState, Mascot, MetricCard, PageIntro } from "./components";
+import { Badge, BrandMark, Button, Card, EmptyState, ErrorState, LoadingState, Mascot, MetricCard, PageIntro, ToolPageHeader } from "./components";
 import { formatLbrMean, LEARNING_BEHAVIORS, LBR_NA_LABEL, LBR_SCALE, type BehaviorKey, type LbrRating } from "./domain/learning-behaviors";
 
 type BehaviorCopy = { key: BehaviorKey; number: number; name: string; shortName: string; description: string; example: string; reflectionPrompt: string };
@@ -60,8 +60,8 @@ function shortPhase(value: string | null | undefined, started: boolean) {
 
 export function LearningBehaviorsToolOverviewPage() {
   const { data, loading, error } = useLbrData<{ activities: Array<{ activity_id: string; title: string; state: string; session_name: string | null; participant_count: number; self_locked_count: number; peer_submission_count: number }> }>("/owner/learning-behaviors");
-  return <div className="page-stack lbr-overview">
-    <PageIntro eyebrow="REFLECTION TOOL" title="Learning Behaviors Reflection" description="A guided four-phase activity for noticing, asking, reflecting, and choosing what to try next." action={<Button variant="orange" to="/learning-behaviors/new" icon={<Plus size={16} />}>Create activity</Button>} />
+  return <div className="page-stack tool-overview-page lbr-overview">
+    <ToolPageHeader title="Learning Behaviors Reflection" description="A guided four-phase activity for noticing, asking, reflecting, and choosing what to try next." />
     <section className="lbr-tool-hero"><div><Badge tone="yellow">SIX FIXED BEHAVIORS</Badge><h2>Learn by asking<br />each other.</h2><p>Participants reflect on their own habits, invite face-to-face feedback on their phone, save quick notes, and choose a next step.</p><Button variant="yellow" to="/learning-behaviors/new">Set up an activity</Button></div><div className="lbr-hero-art"><Mascot kind="sun" /><span>✦</span><i /><b /></div></section>
     <div className="lbr-phase-strip">{[["01", "Self-assessment", "Six 1–5 or N/A choices"], ["02", "Ask for feedback", "Pass the phone in person"], ["03", "My Reflection", "Review what you heard"], ["04", "My Actions", "One optional note"]].map(([number, title, copy]) => <Card key={number} className="lbr-phase-tile"><span>{number}</span><strong>{title}</strong><small>{copy}</small></Card>)}</div>
     <section className="section-block"><div className="section-heading"><div><span className="eyebrow">YOUR ACTIVITIES</span><h2>Learning Behaviors Reflection</h2></div></div>

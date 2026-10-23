@@ -56,6 +56,10 @@ export function PageIntro({ eyebrow, title, description, action }: { eyebrow?: s
   return <div className="page-intro"><div>{eyebrow && <div className="eyebrow">{eyebrow}</div>}<h1>{title}<span className="title-dot">.</span></h1>{description && <p>{description}</p>}</div>{action && <div className="page-intro-action">{action}</div>}</div>;
 }
 
+export function ToolPageHeader({ title, breadcrumbTitle = title, description }: { title: string; breadcrumbTitle?: string; description?: string }) {
+  return <div className="tool-page-header"><div className="breadcrumb"><Link to="/tools">My Tools</Link><ArrowRight size={14} /><span>{breadcrumbTitle}</span></div><PageIntro title={title.toUpperCase()} description={description} /></div>;
+}
+
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <section className={`card ${className}`}>{children}</section>;
 }

@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ArrowLeft, ArrowRight, BarChart3, Check, CircleHelp, Copy, Download, ExternalLink, Eye, EyeOff, LockKeyhole, Play, Plus, Radio, RotateCcw, Trash2, Users, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { api, post } from "./api";
-import { Badge, BrandMark, Button, Card, EmptyState, ErrorState, LoadingState, Mascot, PageIntro } from "./components";
+import { Badge, BrandMark, Button, Card, EmptyState, ErrorState, LoadingState, Mascot, PageIntro, ToolPageHeader } from "./components";
 
 type PollOption = { id: string; label: string; sortOrder: number; isOther: boolean };
 type PollResultBar = { optionId: string; label: string; isOther: boolean; count: number; percentage: number };
@@ -56,8 +56,8 @@ export function PollToolOverviewPage() {
   const { data, loading, error, refresh } = usePollData<{ polls: PollListItem[] }>("/owner/polls");
   const [demo, setDemo] = useState(false);
   const polls = data?.polls ?? [];
-  return <div className="page-stack poll-overview-page">
-    <PageIntro eyebrow="POLL TOOL" title="Ask. Listen. See ideas pop." description="Run a quick, focused question with your group." action={<Button variant="orange" to="/polls/new" icon={<Plus size={17} />}>Create activity</Button>} />
+  return <div className="page-stack tool-overview-page poll-overview-page">
+    <ToolPageHeader title="Poll" description="Run a quick, focused question with your group." />
     <section className="poll-overview-hero"><div className="poll-overview-copy"><span className="poll-hero-kicker">REAL-TIME GROUP INPUT</span><h2>Ask. Listen.<br />See ideas pop.</h2><p>One clear question is often all it takes to start a better conversation.</p><div><Button variant="yellow" to="/polls/new" icon={<Plus size={16} />}>Create activity</Button><Button variant="secondary" onClick={() => setDemo((value) => !value)}>{demo ? "Close quick demo" : "See a quick demo"}</Button></div></div><div className="poll-hero-art"><Mascot kind="popp" /><span>✦</span></div><div className="poll-hero-mini-chart"><b>What helps teams thrive?</b><i><span style={{ width: "76%" }} />Clarity</i><i><span style={{ width: "56%" }} />Trust</i><i><span style={{ width: "32%" }} />Time</i></div></section>
     {demo && <Card className="poll-demo-card"><div><Badge tone="yellow">SYNTHETIC DEMO</Badge><h2>What makes a great team day?</h2><p>Sample chart only. This preview is not saved and never appears in your results.</p></div>{["Clear goals", "Time to focus", "Good coffee"].map((label, index) => <div className="poll-bar-row" key={label}><span>{label}</span><div className="poll-bar-track"><i style={{ width: `${[82, 61, 36][index]}%` }} /></div><strong>{[82, 61, 36][index]}%</strong></div>)}</Card>}
     <div className="poll-benefit-grid">{[["Fast to make", "One question, quick setup.", "⚡"], ["Useful live", "See responses update as people vote.", "◉"], ["Easy to share", "QR, link and PIN for your room.", "↗"]].map(([title, copy, icon], index) => <Card key={title} className={`poll-benefit poll-benefit-${index}`}><span>{icon}</span><strong>{title}</strong><p>{copy}</p></Card>)}</div>

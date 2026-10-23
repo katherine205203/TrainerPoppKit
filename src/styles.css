@@ -1323,10 +1323,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 /* SCARF detail page: match the approved feature banner and editorial activity layout. */
-.tool-detail-page { gap: 15px; padding-top: 12px; }
-.tool-detail-heading { display: grid; gap: 3px; margin-bottom: 17px; }
-.tool-detail-heading h1 { margin: 24px 0 0; color: #171a2c; font-size: 56px; font-weight: 900; letter-spacing: -2.2px; line-height: 1; }
-.tool-detail-heading > p { margin: 0; color: #262638; font-size: 17px; }
 .tool-detail-hero { height: 300px; min-height: 300px; border-radius: 22px; }
 .tool-detail-copy { width: 43%; padding: 23px 32px; }
 .tool-detail-copy h2 { margin: 0 0 2px; font-size: clamp(64px, 6vw, 88px); font-weight: 900; letter-spacing: -4px; line-height: 1; }
@@ -1525,10 +1521,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .result-page .results-header { margin-bottom: 10px; }
   .result-metrics .metric-card { min-height: 86px; }
   .result-page { padding-top: 12px; }
-  .tool-detail-page { padding-top: 5px; }
-  .tool-detail-heading h1 { margin-top: 16px; font-size: 40px; }
-  .tool-detail-heading { margin-bottom: 0; }
-  .tool-detail-heading > p { font-size: 14px; }
   .tool-detail-hero { height: auto; min-height: 285px; }
   .tool-detail-copy { width: 63%; padding: 21px; }
   .tool-detail-copy h2 { font-size: 58px; }
@@ -1576,10 +1568,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .session-participation-cards { grid-template-columns: 1fr; }
   .session-team-grid { grid-template-columns: 1fr; }
   .archive-page, .sessions-page, .result-page { padding-top: 0; }
-  .tool-detail-page { gap: 12px; padding-top: 0; }
-  .tool-detail-heading { padding-right: 10px; }
-  .tool-detail-heading h1 { margin-top: 12px; font-size: 34px; }
-  .tool-detail-heading > p { font-size: 12px; }
   .tool-detail-hero { min-height: 330px; border-radius: 18px; }
   .tool-detail-copy { width: 78%; padding: 19px; }
   .tool-detail-copy h2 { font-size: 48px; }
@@ -2497,6 +2485,22 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .rw-presenter-brand .brand-wordmark { font-size: 12px; }.rw-presenter-status > .badge { font-size: 8px; }.rw-presenter-footer { font-size: 7px; }
 }
 @media (prefers-reduced-motion: reduce) { .rw-list-row { transition: none; } }
+
+/* Shared hierarchy for every tool overview page. */
+.tool-overview-page { gap: 20px; padding-top: 18px; }
+.tool-page-header { display: grid; gap: 17px; }
+.tool-page-header .breadcrumb { min-height: 16px; gap: 9px; font-size: 12px; }
+.tool-page-header .breadcrumb svg { color: #7c7d8d; }
+.tool-page-header .page-intro { min-height: 0; }
+.tool-page-header .page-intro h1 { margin: 0; font-size: clamp(44px, 4vw, 56px); letter-spacing: -2.3px; line-height: 1.04; text-transform: uppercase; }
+.tool-page-header .page-intro p { margin: 8px 0 0; font-size: 16px; }
+
+@media (max-width: 650px) {
+  .tool-overview-page { gap: 16px; padding-top: 14px; }
+  .tool-page-header { gap: 13px; }
+  .tool-page-header .page-intro h1 { font-size: clamp(31px, 8.5vw, 39px); letter-spacing: -1.4px; }
+  .tool-page-header .page-intro p { margin-top: 6px; font-size: 13px; }
+}
 
 /* SCARF v1.1 needs profile: distinct from the preserved intensity/priority measures. */
 .scarf-person-link { display: grid; width: 100%; justify-items: start; gap: 3px; border: 0; padding: 5px 4px; color: inherit; background: transparent; text-align: left; font: inherit; cursor: pointer; }

@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ArrowLeft, ArrowRight, Copy, Download, Eye, EyeOff, LockKeyhole, MessageCircle, Pencil, Plus, Radio, Send, Sparkles, Trash2, Users, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { ApiError, api, post } from "./api";
-import { Badge, BrandMark, Button, Card, EmptyState, ErrorState, LoadingState, Mascot, PageIntro } from "./components";
+import { Badge, BrandMark, Button, Card, EmptyState, ErrorState, LoadingState, Mascot, PageIntro, ToolPageHeader } from "./components";
 import { REFLECTION_REACTIONS } from "./domain/reflection-wall";
 
 type Phase = "DRAFT" | "OPEN" | "PAUSED" | "CLOSED" | "ARCHIVED";
@@ -49,7 +49,7 @@ export function ReflectionWallToolOverviewPage() {
   const [items, setItems] = useState<Array<{ activity_id: string; title: string; phase: Phase; session_name: string | null; visible_count: number; post_count: number }>>([]);
   const [error, setError] = useState("");
   useEffect(() => { api<{ activities: typeof items }>("/owner/reflection-walls").then((data) => setItems(data.activities)).catch((reason) => setError(reason.message)); }, []);
-  return <div className="page-stack rw-overview"><div className="breadcrumb"><Link to="/tools">My Tools</Link><ArrowRight size={14} /><span>Reflection Wall</span></div>
+  return <div className="page-stack tool-overview-page rw-overview"><ToolPageHeader title="Reflection Wall" />
     <div className="rw-overview-hero"><div><Badge tone="pink">LIVE REFLECTION</Badge><h1>Make space<br />for every thought<span className="title-dot">.</span></h1><p>A shared, real-time board for Post-its, reactions and comments. Run it on its own or as part of a Session.</p><Button variant="orange" to="/reflection-walls/new" icon={<Plus size={17} />}>Create a Reflection Wall</Button></div><div className="rw-overview-art"><Mascot kind="popp" /><span>✦</span></div></div>
     {error && <ErrorState message={error} />}
     <div className="section-heading"><div><span className="eyebrow">YOUR ACTIVITIES</span><h2>Reflection Walls</h2></div><Button variant="secondary" to="/reflection-walls/new" icon={<Plus size={16} />}>New wall</Button></div>

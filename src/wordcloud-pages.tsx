@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ArrowRight, Check, Copy, Download, Eye, EyeOff, LockKeyhole, Plus, RefreshCw, RotateCcw, Sparkles, Trash2, Users } from "lucide-react";
+import { ArrowRight, Check, Copy, Download, Eye, EyeOff, LockKeyhole, RefreshCw, RotateCcw, Sparkles, Trash2, Users } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { api, post } from "./api";
-import { Badge, BrandMark, Button, Card, EmptyState, ErrorState, LoadingState, Mascot, PageIntro } from "./components";
+import { Badge, BrandMark, Button, Card, EmptyState, ErrorState, LoadingState, Mascot, PageIntro, ToolPageHeader } from "./components";
 import { countGraphemes, validateWordSubmission } from "./domain/wordcloud";
 
 type Phase = "DRAFT" | "READY" | "OPEN" | "CLOSED" | "ARCHIVED";
@@ -55,7 +55,7 @@ export function WordCloudOverviewPage() {
   const [items, setItems] = useState<CloudListItem[] | null>(null);
   const [error, setError] = useState("");
   useEffect(() => { let alive = true; api<{ wordClouds: CloudListItem[] }>("/owner/wordclouds").then((data) => { if (alive) setItems(data.wordClouds); }).catch((reason) => { if (alive) setError(reason instanceof Error ? reason.message : "Could not load activities."); }); return () => { alive = false; }; }, []);
-  return <div className="page-stack wc-overview"><PageIntro eyebrow="FACILITATION TOOL" title="Word Cloud" description="Gather anonymous words and make shared themes visible." action={<Button to="/wordclouds/new" variant="orange" icon={<Plus size={17} />}>Create activity</Button>} />
+  return <div className="page-stack tool-overview-page wc-overview"><ToolPageHeader title="Word Cloud" description="Gather anonymous words and make shared themes visible." />
     <section className="wc-overview-hero"><div><span className="eyebrow">A SPACE FOR EVERY VOICE</span><h2>Let the group’s words<br />take shape<span>!</span></h2><p>Participants submit a few words privately. You choose when to reveal a live, anonymous cloud.</p><Button variant="yellow" to="/wordclouds/new">Create a Word Cloud <ArrowRight size={16} /></Button></div><div className="wc-cloud-art" aria-hidden="true"><span>ideas</span><span>trust</span><span>curiosity</span><span>teamwork</span><span>growth</span><Mascot kind="popp" /></div></section>
     <div className="section-heading"><div><span className="eyebrow">YOUR ACTIVITIES</span><h2>Word Cloud sessions</h2></div></div>
     {error ? <ErrorState message={error} /> : items === null ? <LoadingState label="Loading Word Clouds…" /> : items.length ? <div className="wc-list">{items.map((item) => <WordCloudCard item={item} key={item.activity_id} />)}</div> : <Card><EmptyState title="Start with one good question" description="Create a standalone activity or attach a Word Cloud to an existing Session." action={<Button to="/wordclouds/new" variant="orange">Create your first activity</Button>} /></Card>}
