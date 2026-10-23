@@ -87,9 +87,13 @@ function OwnerLayout() {
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
   const location = useLocation();
-  const isSessionList = location.pathname === "/sessions";
   const isToolWorkspace = location.pathname.startsWith("/tools/")
     || /^\/(?:activities\/(?:new|[^/]+\/(?:live|presenter))|results\/[^/]+|polls(?:\/|$)|wordclouds(?:\/|$)|reflection-walls(?:\/|$)|learning-behaviors(?:\/|$))/.test(location.pathname);
+  const isQuietWorkspace = isToolWorkspace || location.pathname === "/archive" || /^\/sessions(?:\/|$)/.test(location.pathname);
+
+  function showHelp() {
+    window.alert("TrainerPopp!Kit is a personal facilitation workspace. Participant results stay private until you reveal them.");
+  }
 
   function search(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -105,12 +109,12 @@ function OwnerLayout() {
         {navItems.map(({ to, label, shape }) => <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => `side-link ${isActive ? "side-link-active" : ""}`} onClick={() => setMobileOpen(false)}><NavShape shape={shape} /><span>{label}</span></NavLink>)}
       </nav>
       <div className="sidebar-character"><Mascot kind="flower" /></div>
-      <div className="sidebar-bottom"><button type="button" className="side-link side-action" onClick={() => navigate("/settings")}><Settings size={20} /><span>Settings</span></button><button type="button" className="trainer-chip" onClick={() => void signOut()}><span className="trainer-avatar"><Mascot kind="bean" /></span><span><strong>My Trainer Space</strong><small>Owner account</small></span><LogOut size={17} /></button></div>
+      <div className="sidebar-bottom"><button type="button" className="side-link side-action notification-side-action" aria-label="Help and guidance" title="Help and guidance" onClick={showHelp}><Bell size={20} /><span>Help and guidance</span><i className="sidebar-notification-dot" /></button><button type="button" className="side-link side-action" onClick={() => navigate("/settings")}><Settings size={20} /><span>Settings</span></button><button type="button" className="trainer-chip" onClick={() => void signOut()}><span className="trainer-avatar"><Mascot kind="bean" /></span><span><strong>My Trainer Space</strong><small>Owner account</small></span><LogOut size={17} /></button></div>
     </aside>
     <div className="main-column">
-      <header className={`topbar ${isToolWorkspace ? "topbar-focused" : ""}`}><button className="mobile-menu" aria-label={mobileOpen ? "Close menu" : "Open menu"} onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button>
-        {!isToolWorkspace && <form className="top-search" onSubmit={search}><Search size={15} /><input aria-label="Search tools" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tools, sessions, or anything…" /></form>}
-        <div className="topbar-actions">{!isToolWorkspace && (isSessionList ? <Button variant="orange" to="/sessions/new" icon={<Plus size={14} />}>Create session</Button> : <Button variant="orange" to="/activities/new" icon={<Plus size={14} />}>Create activity</Button>)}<button className="help-button" title="Help and guidance" onClick={() => window.alert("TrainerPopp!Kit is a personal facilitation workspace. Participant results stay private until you reveal them.")}><Bell size={15} /><span className="help-dot" /></button></div>
+      <header className={`topbar ${isQuietWorkspace ? "topbar-quiet" : ""}`}><button className="mobile-menu" aria-label={mobileOpen ? "Close menu" : "Open menu"} onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button>
+        {!isQuietWorkspace && <form className="top-search" onSubmit={search}><Search size={15} /><input aria-label="Search tools" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tools, sessions, or anything…" /></form>}
+        {!isQuietWorkspace && <div className="topbar-actions"><Button variant="orange" to="/activities/new" icon={<Plus size={14} />}>Create activity</Button></div>}
       </header>
       <main className="owner-content"><Outlet /></main>
     </div>
