@@ -84,9 +84,9 @@ function NavShape({ shape }: { shape: string }) {
 function OwnerLayout() {
   const { signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const navigate = useNavigate();
   const location = useLocation();
+  const query = new URLSearchParams(location.search).get("search") ?? "";
   const isToolWorkspace = location.pathname.startsWith("/tools/")
     || /^\/(?:activities\/(?:new|[^/]+\/(?:live|presenter))|results\/[^/]+|polls(?:\/|$)|wordclouds(?:\/|$)|reflection-walls(?:\/|$)|learning-behaviors(?:\/|$))/.test(location.pathname);
   const isQuietWorkspace = isToolWorkspace || location.pathname === "/archive" || /^\/sessions(?:\/|$)/.test(location.pathname);
@@ -97,6 +97,7 @@ function OwnerLayout() {
 
   function search(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const query = String(new FormData(event.currentTarget).get("search") ?? "");
     const destination = location.pathname.startsWith("/sessions") ? "/sessions" : "/tools";
     navigate(`${destination}${query.trim() ? `?search=${encodeURIComponent(query.trim())}` : ""}`);
     setMobileOpen(false);
@@ -113,7 +114,7 @@ function OwnerLayout() {
     </aside>
     <div className="main-column">
       <header className={`topbar ${isQuietWorkspace ? "topbar-quiet" : ""}`}><button className="mobile-menu" aria-label={mobileOpen ? "Close menu" : "Open menu"} onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button>
-        {!isQuietWorkspace && <form className="top-search" onSubmit={search}><Search size={15} /><input aria-label="Search tools" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tools, sessions, or anything…" /></form>}
+        {!isQuietWorkspace && <form className="top-search" onSubmit={search}><Search size={15} /><input key={`${location.pathname}${location.search}`} name="search" aria-label="Search tools" defaultValue={query} placeholder="Search tools, sessions, or anything…" /></form>}
         {!isQuietWorkspace && <div className="topbar-actions"><Button variant="orange" to="/activities/new" icon={<Plus size={14} />}>Create activity</Button></div>}
       </header>
       <main className="owner-content"><Outlet /></main>

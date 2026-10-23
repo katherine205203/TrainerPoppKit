@@ -118,36 +118,26 @@ export function HomePage() {
 }
 
 const TOOL_CARDS = [
-  { title: "SCARF Assessment", category: "Assessment", description: "A 30-question reflection on five social needs.", tone: "orange", icon: "sun", available: true },
-  { title: "Word Cloud", category: "Collaboration", description: "Collect anonymous words and reveal shared themes as a live group cloud.", tone: "purple", icon: "flower", available: true },
-  { title: "Reflection Wall", category: "Reflection", description: "Share Post-its, reactions and comments in a live, moderated reflection space.", tone: "yellow", icon: "popp", available: true },
-  { title: "Team Poll", category: "Voting", description: "Ask one focused question and see your group’s answers live.", tone: "aqua", icon: "flower", available: true },
-  { title: "Learning Behaviors Reflection", category: "Reflection", description: "Reflect on six learning behaviors, invite anonymous peer feedback, and choose a small next step.", tone: "aqua", icon: "bean", available: true },
+  { title: "SCARF Assessment", category: "Assessment", description: "Explore the five social needs.", tone: "peach", icon: "sun", route: "/tools/scarf", available: true },
+  { title: "Reflection Wall", category: "Reflection", description: "Share thoughts and reflections with your group.", tone: "yellow", icon: "flower", route: "/tools/reflection-wall", available: true },
+  { title: "Team Poll", category: "Voting", description: "Ask a question and see responses live.", tone: "aqua", icon: "flower", route: "/tools/poll", available: true },
+  { title: "Word Cloud", category: "Collaboration", description: "Collect ideas and reveal shared themes.", tone: "lavender", icon: "flower", route: "/tools/wordcloud", available: true },
+  { title: "Learning Behaviors Reflection", category: "Reflection", description: "Explore how you learn and work.", tone: "pink", icon: "bean", route: "/tools/learning-behaviors", available: true },
 ];
 
 export function ToolsPage() {
   const [params, setParams] = useSearchParams();
   const [category, setCategory] = useState("All tools");
   const search = params.get("search") ?? "";
-  const [favorites, setFavorites] = useState<string[]>(() => getStoredIds("trainerpopp:favourite-tools"));
-  const { data: activityData } = useData<{ activities: Activity[] }>("/owner/activities");
+  const [favorites] = useState<string[]>(() => getStoredIds("trainerpopp:favourite-tools"));
   const categories = ["All tools", "Assessment", "Reflection", "Voting", "Collaboration", "Favorites"];
-  const filtered = TOOL_CARDS.filter((tool) => {
+  const filtered = TOOL_CARDS.filter((tool) => tool.available).filter((tool) => {
     const matchesCategory = category === "All tools" || (category === "Favorites" ? favorites.includes(tool.title) : tool.category === category);
     return matchesCategory && `${tool.title} ${tool.description}`.toLowerCase().includes(search.toLowerCase());
   });
-  const recentActivities = activityData?.activities.slice(0, 3) ?? [];
-  useEffect(() => { try { window.localStorage.setItem("trainerpopp:favourite-tools", JSON.stringify(favorites)); } catch { /* Favorites remain available for this page view if storage is disabled. */ } }, [favorites]);
-  function toggleFavorite(title: string) {
-    setFavorites((current) => current.includes(title) ? current.filter((item) => item !== title) : [...current, title]);
-  }
-  return <div className="page-stack"><PageIntro title="My Tools" description="Choose a tool to spark the right kind of conversation." />
-    <div className="toolbar-row"><div className="filter-pills" role="group" aria-label="Filter tools">{categories.map((item) => <button key={item} className={`filter-pill ${category === item ? "selected" : ""}`} onClick={() => setCategory(item)}>{item === "Favorites" && <Heart size={14} fill={category === item ? "currentColor" : "#ff6bcb"} />} {item}</button>)}</div></div>
-    {category === "All tools" && !search && <section className="tools-feature-grid"><div className="scarf-tool-banner"><div className="scarf-banner-copy"><Badge tone="orange">SCARF ASSESSMENT · v0.2</Badge><h2>SCARF</h2><strong>Explore what shapes people’s experience at work.</strong><p>30 questions, personal reflection results, trainer analytics and a privacy-protected presenter view.</p><div className="scarf-banner-actions"><Button variant="yellow" to="/tools/scarf">Open tool <ArrowRight size={16} /></Button><Button variant="secondary" to="/activities/new">Create activity</Button></div></div><div className="scarf-banner-art"><Mascot kind="sun" /><span className="art-spark art-spark-one">✦</span><div className="scarf-banner-dimensions">{SCARF_DIMENSIONS.map((name, i) => <span key={name}><b style={{ background: SCARF_COLORS[i] }}>{name[0]}</b>{name}</span>)}</div></div></div>
-      <aside className="tools-recent-panel"><div className="section-heading"><h2>Recently used</h2><Link className="text-link" to="/archive">View all <ArrowRight size={15} /></Link></div>{recentActivities.length ? <div className="tools-recent-list">{recentActivities.map((activity, index) => <Link key={activity.id} className="tools-recent-item" to={activityRoute(activity)}><span className={`tools-recent-art tools-recent-art-${index % 3}`}><Mascot kind={index % 2 ? "flower" : "sun"} /></span><span><strong>{activity.title}</strong><small>{activity.session_name || "Quick activity"}</small></span><ArrowRight size={16} /></Link>)}</div> : <div className="tools-recent-empty"><Mascot kind="flower" /><strong>Nothing used yet</strong><span>Open a tool to see it here.</span></div>}</aside>
-    </section>}
-    <div className="section-heading tool-library-heading"><h2>{search ? "Search results" : "All tools"}</h2><span className="subtle-text">{TOOL_CARDS.length} available</span></div>
-    {filtered.length ? <div className="tool-grid">{filtered.map((tool) => <article className={`tool-card tool-card-${tool.tone}`} key={tool.title}><div className="tool-card-top"><Badge tone="orange">{tool.category === "Voting" ? "Ready to use" : tool.title === "Word Cloud" ? "Anonymous responses" : tool.title === "Reflection Wall" ? "Live collaboration" : tool.title === "Learning Behaviors Reflection" ? "Four phase activity" : "30-question reflection"}</Badge><Mascot kind={tool.icon as "flower" | "sun" | "bean" | "spark" | "popp"} /></div><button className={`tool-favorite ${favorites.includes(tool.title) ? "tool-favorite-active" : ""}`} aria-label={favorites.includes(tool.title) ? `Remove ${tool.title} from favorites` : `Add ${tool.title} to favorites`} aria-pressed={favorites.includes(tool.title)} onClick={() => toggleFavorite(tool.title)}><Heart size={17} fill={favorites.includes(tool.title) ? "currentColor" : "none"} /></button><div><span className="eyebrow">{tool.category}</span><h3>{tool.title}</h3><p>{tool.description}</p></div><Link to={tool.title === "Team Poll" ? "/tools/poll" : tool.title === "Word Cloud" ? "/tools/wordcloud" : tool.title === "Reflection Wall" ? "/tools/reflection-wall" : tool.title === "Learning Behaviors Reflection" ? "/tools/learning-behaviors" : "/tools/scarf"} className="card-link">Open tool <ArrowRight size={17} /></Link></article>)}</div> : <EmptyState title="No tools match that search" description="Try another search or switch the category filter." action={<Button variant="quiet" onClick={() => { const next = new URLSearchParams(params); next.delete("search"); setParams(next); }}>Clear search</Button>} />}
+  return <div className="page-stack tools-library-page"><PageIntro title="My Tools" description="Choose a tool to spark the right kind of conversation." />
+    <div className="toolbar-row"><div className="filter-pills" role="group" aria-label="Filter tools">{categories.map((item) => <button type="button" key={item} className={`filter-pill ${category === item ? "selected" : ""}`} aria-pressed={category === item} onClick={() => setCategory(item)}>{item === "Favorites" && <Heart size={14} fill={category === item ? "currentColor" : "#ff6bcb"} />} {item}</button>)}</div></div>
+    {filtered.length ? <div className="tool-grid">{filtered.map((tool) => <Link className={`tool-card tool-card-${tool.tone}`} key={tool.title} to={tool.route} aria-label={`${tool.title}. ${tool.description}`}><span className="tool-card-copy"><h2>{tool.title}</h2><span>{tool.description}</span></span><span className="tool-card-landscape" aria-hidden="true" /><span className="tool-card-rays" aria-hidden="true" /><Mascot className="tool-card-mascot" kind={tool.icon as "flower" | "sun" | "bean" | "spark" | "popp"} /><span className="tool-card-arrow" aria-hidden="true"><ArrowRight size={23} strokeWidth={2.3} /></span></Link>)}</div> : <EmptyState title="No tools match that search" description="Try another search or switch the category filter." action={<Button variant="quiet" onClick={() => { const next = new URLSearchParams(params); next.delete("search"); setParams(next); }}>Clear search</Button>} />}
   </div>;
 }
 
