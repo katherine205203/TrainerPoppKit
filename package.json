@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "WRANGLER_WRITE_LOGS=false vite --host 127.0.0.1 --port 8787",
-    "build": "WRANGLER_WRITE_LOGS=false vite build",
+    "build": "node scripts/build.mjs",
     "preview": "WRANGLER_WRITE_LOGS=false vite preview --host 127.0.0.1",
     "test": "vitest run --config vitest.config.ts",
     "test:watch": "vitest",
@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit && tsc -p tsconfig.worker.json --noEmit",
     "lint": "eslint .",
     "db:migrate": "WRANGLER_WRITE_LOGS=false wrangler d1 migrations apply trainerpopp-kit --local",
-    "deploy": "WRANGLER_WRITE_LOGS=false vite build && WRANGLER_WRITE_LOGS=false wrangler deploy"
+    "deploy": "npm run build && WRANGLER_WRITE_LOGS=false wrangler deploy"
   },
   "dependencies": {
     "lucide-react": "^1.61.0",

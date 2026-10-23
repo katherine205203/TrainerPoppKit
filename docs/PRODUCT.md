@@ -24,7 +24,7 @@ A lightweight **personal web app for a trainer/facilitator** to prepare, run and
 - Displays clean visuals that remain legible on a projector.
 - Can operate fullscreen from the same laptop or on a separate screen/window controlled by trainer.
 - Shows only the current permitted presentation state, not private admin tools, submissions or raw answers.
-- Has filters and toggles relevant to the tool; SCARF needs `Personal Pattern` and `Relative to Team` comparisons.
+- Has filters and toggles relevant to the tool; SCARF compares `Personal Pattern` and `Compared to Class` using the Integrated Needs Profile.
 - Can hide/reveal results, identify/anonymize per consent, switch team, control comparison rules and return to a neutral waiting screen.
 
 ## Functional organization
@@ -53,7 +53,7 @@ Execution context
 - **Presentation state**: current view, filters, privacy, reveal status and active output, controlled by trainer.
 
 ## SCARF class example (first acceptance scenario)
-Trainer creates a SCARF activity for an in-person workshop of 24 people split into 4 teams. QR and PIN are shown on projector. Guests join on phones, provide names/team and answer. Trainer observes 18/24 complete, can close responses, and decides when to present. Presenter heatmap can switch between (a) dimension priority **within** each person's five dimensions and (b) that person's dimension score **relative** to peers in the selected group. Trainer can choose named vs anonymous presentation **only when permission allows**. This is a discussion aid, not a personnel evaluation.
+Trainer creates a SCARF activity for an in-person workshop of 24 people split into 4 teams. QR and PIN are shown on projector. Guests join on phones, provide names/team and answer. Trainer observes 18/24 complete, can close responses, and decides when to present. Trainer results can switch between each participant’s personal pattern and same-domain differences from the participant-weighted class mean. Presenter shows only privacy-protected team aggregates; individual names and scores remain trainer-only. This is a discussion aid, not a personnel evaluation.
 
 ## Initial MVP: must have
 1. Single-owner login, dashboard, tool library and SCARF tool entry.
@@ -61,7 +61,7 @@ Trainer creates a SCARF activity for an in-person workshop of 24 people split in
 3. QR/link/PIN join, temporary guest identity and optional teams.
 4. Mobile assessment experience with draft/recovery/error states and submission.
 5. Trainer progress count, activity open/close and result visibility policies.
-6. SCARF scoring once its approved item set/rules are supplied.
+6. SCARF scoring uses the supplied v0.2 candidate items and v1.1 scoring addendum, clearly disclosed as experimental and unvalidated.
 7. Individual results + group summary + heatmap + personal/team-relative view.
 8. Presenter on same screen and controllable separate screen (can implement the separate control via shared server state / polling in v1).
 9. Basic activity history; clear deletion/privacy controls for personal data.

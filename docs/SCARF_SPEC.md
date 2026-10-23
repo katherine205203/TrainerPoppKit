@@ -1,69 +1,56 @@
-# SCARF tool — functional specification and measurement boundaries
+# SCARF Assessment — implementation contract
 
-## Goal
-A trainer-led activity to let individuals and teams explore their relative needs/preferences across the five SCARF dimensions, and discuss differences respectfully. It is not a hiring, performance ranking, clinical or validated diagnostic product by default.
+**Current source:** `TrainerPoppKit_SCARF_Product_Pack_v1.2.zip`, including the Product Specification, immutable English Question Bank v0.2, Scoring Specification v1.1, Codex Handoff, eight participant mobile references, trainer and presenter references, and app branding references. The scoring addendum replaces only the results, scoring, and heatmap portions of the earlier product spec; its other locked product decisions remain in force.
 
-## The five dimensions
-1. **Status**
-2. **Certainty**
-3. **Autonomy**
-4. **Relatedness**
-5. **Fairness**
+**Instrument status:** experimental and not psychometrically validated. These 30 candidate items are not represented as an official NeuroLeadership Institute questionnaire. The app must not make clinical, diagnostic, trait, competence, or population-norm claims.
 
-The earlier visual reference sometimes uses `Safety` incorrectly. Correct label is `Status`.
+## Locked module decisions
 
-## Required participant flow
-Join → identify/name → (optional select team) → instructions/disclosure → answer assessment → submit → visibility-policy outcome.
+1. This module is SCARF Assessment, personal results, trainer analytics/heatmaps, and presenter mode. It does not add separate check-in or reflection activities.
+2. Activities may be standalone or attached to an existing session.
+3. At activity creation the trainer chooses `immediate` or `trainer_released`. The choice freezes at first open/join; an existing release is not silently revoked.
+4. The owner may view named individual results. Presenter capabilities are aggregate-only and never receive participant records or identifiers.
+5. Analytics support activity, session, and team scopes. Session reports select the latest compatible response per session identity and disclose incompatible-version exclusions.
+6. Each participant has one current submission per activity and cannot self-retake. An owner reset clears current answers/results, increments the generation, and writes an audit event.
+7. Keep the 30 questions and all three response sections unchanged. Continue storing **Reaction Intensity** and **Driver Priority**. Add the **Integrated SCARF Needs Profile** as a separate derived view and use it for current heatmaps.
+8. Heatmap modes are **Personal Pattern** and **Compared to Class**. Team means are participant-weighted; the comparison reference is the same-domain class mean.
 
-## Required trainer controls
-- Configure and launch activity; teams optional and editable per user choice.
-- View progress by participant/team and handle reopening/closure.
-- Preview results privately before revealing anything to audience.
-- Control result publication and display name/anonymous presentation subject to participant consent.
-- Choose Team and choose the comparison basis in heatmap; display legend and sample size.
+## Participant flow and privacy
 
-## Result views
+- Reuse existing no-account QR/link/PIN join, participant identity, team, and scoped temporary guest token.
+- Welcome → Q01–Q10 reactions → transition → Q11–Q20 trade-offs → transition → Q21–Q30 three-way rankings → submission → personal results or release-waiting state.
+- Question APIs return permitted text and response choices only. Domain mappings and score keys stay server-side.
+- Autosave each complete answer, keep the current question/view for resume, allow back/edit before submission, and make submitted attempts read-only until an owner reset.
+- A paused or closed activity rejects answer changes and submission. Participant results are available only through that participant’s token and the selected release policy. Raw answers are not returned by participant or presenter APIs.
 
-### 1. Individual score/profile
-Show five dimension values as calculated by the approved algorithm; do not infer that high means superior. Make it clear what scores measure and which item set/version was used.
+## Versioned scoring
 
-### 2. Within-person pattern
-For each person, compare the five dimensions **within the same person's response profile** (e.g., ranking/relative priorities based on approved scoring). A 4.2 that is low within one's profile can still be high relative to team members. Never label within-person ranking as a norm-referenced percentile.
+The immutable v0.2 question bank contains 30 English items in original order. New activities pin instrument `0.2.0` and scoring `1.1.0`. The server validates and recalculates every result from persisted answers.
 
-### 3. Team-relative comparison
-For each dimension, compare an individual with the **selected comparison population**, such as the same team. The population, exclusions, ties and threshold method must be explicit. This is descriptive comparison within this group, not a population norm.
+- **Reaction Intensity (R):** Q01–Q10 use integer 1–10 item-specific anchors. Each domain’s score is the mean of its two mapped reactions.
+- **Trade-off preference (B):** Q11–Q20 allocate A/B points using `(1,0)`, `(.75,.25)`, `(.5,.5)`, `(.25,.75)`, or `(0,1)` for `strong_A`, `lean_A`, `equal`, `lean_B`, or `strong_B`. Each domain appears four times; divide allocated points by four.
+- **Three-way ranking (T):** Q21–Q30 require a complete A/B/C permutation. Award `(1,.5,0)` for first/second/third rank. Each domain appears six times; divide points by six.
+- **Driver Priority (P):** `1 + 9 × (0.5 × B + 0.5 × T)`. Each domain is 1–10 and the five priorities sum to 27.5 by construction. R and P remain separate measures.
+- **Integrated Needs Profile:** within each section separately (R, B, T), rank the five domain scores descending using midranks; values within `1e-9` are ties. Convert each rank to `H = (5 - rank) / 4`, then calculate `NeedsIndex = 1 + 9 × mean(H_R, H_B, H_T)`. Rank the five final NeedsIndex values with the same descending midrank rule. Higher index means more favored relative to the person’s other domains in this activity; it is not an absolute need level.
 
-### 4. Team heatmap
-Rows: participants (or anonymous IDs) and optionally summary. Columns: five SCARF dimensions. User can toggle *Within-person* / *Relative to team*. Display color legend and accessible numeric text when allowed. Team filter; aggregate-only view when individual disclosure is inappropriate.
+Persist R, B, T, P, Integrated Needs Index/rank, instrument/scoring versions, generation, and reproducibility metadata. Migration `0010_scarf_scoring_v11.sql` adds nullable v1.1 fields; historical v0.2 results remain intact and are not silently rescored or relabeled.
 
-### 5. Group summary
-Describe mean/median/distribution/spread where appropriate. Do not overinterpret percentile in very small groups. Do not silently assign low=negative or high=positive.
+## Results and analytics
 
-## P25/P75 example (not finalized)
-User suggested color tiers based on lower 25%, middle 50%, upper 25%. This is an exploration requirement, not an approved algorithm. For small groups (e.g., 5–6 people), discrete percentile buckets are unstable; handle ties, labels, suppressed small-n views and sample-size warning. Do not force exactly 25% of members into each bin.
+- Participant results lead with the Integrated Needs Profile and personal pattern/detail views; Reaction Intensity and Driver Priority remain available separately as additional measures.
+- Trainer results include named progress/submission rows, personal pattern ranks, same-domain class deltas on a fixed ±3 display scale, team-by-domain means and deltas, release/reset controls, compatible session analytics, and safe CSV export. Trainer-only named records remain behind owner authentication.
+- Team means first average participant-level NeedsIndex values. The class mean weights each participant equally, not each team equally. Team ranking is then computed from the five team means.
+- Historical results without v1.1 fields do not receive an Integrated Needs Profile. The UI identifies the older scoring version and preserves its R/P measures.
+- Presenter receives only server-computed aggregate NeedsIndex values. Require five distinct compatible, released submissions for any displayed aggregate. If any team is below five, suppress the entire team breakdown and complementary values while retaining the overall aggregate only when its cohort is at least five. Suppress both values and visual encodings when unsafe.
+- Session analytics use the latest compatible submission per session identity. Presenter data contains no names, IDs, answer records, roles, or consent fields.
 
-## Measurement/scoring is explicitly blocked pending approval
-Do **not** generate plausible-looking SCARF items and present them as validated. Before implementing production assessment/scoring, obtain:
-1. An approved question bank and proof of permitted use (existing instrument/license or independently authored items).
-2. Language, dimensions assigned to items, scales/anchors and reverse-coded items if any.
-3. Versioned dimension scoring rules, omissions/ties, rounding and valid submission criteria.
-4. Rule for within-person comparison, group-relative percentile and interpretation copy.
-5. Notice/consent text for named results and projector presentation.
+## Visual implementation
 
-UI mock data is acceptable for prototyping if unmistakably labelled **DEMO / MOCK** and excluded from production analytics.
+Follow the supplied P01–P08 mobile mockups and desktop trainer/presenter references while reusing the existing TrainerPopp!Kit shell and electric blue, warm white, orange, yellow, pink, aqua, lavender, and mascot identity. Use responsive, data-backed controls rather than static screenshots. Numerical pixel-diff similarity has not been measured.
 
-## Data and interpretation safeguards
-- Store `instrument_version`, `scoring_version`, activity id and timestamp with computed results.
-- Avoid treating raw ranking/forced-choice and Likert scores as mathematically interchangeable.
-- Hide named personal results unless permitted. Trainer access and projector access are separate scopes.
-- Any group threshold policy must disclose minimum-n restrictions.
-- Open question: clarify whether SCARF measures **personal drivers** or **current team experience**; these constructs should not share the same scoring/interpretation without justification. Initial concept prioritized personal drivers.
+## Verification and remaining work
 
-## Minimum test scenarios
-- Five dimension scores correctly associated with labels and their approved items.
-- A person's lowest internal dimension can be higher than the team mean and switches view correctly.
-- Identical scores/ties handled explicitly; percentile display warns when n is insufficient.
-- Moving a participant to another team recalculates group summaries without corrupting raw submission.
-- With results hidden, guest/public presentation endpoints do not leak score payloads.
-- Unconsented named profiles cannot appear on projector.
-- Submission retry does not count twice; invalid/missing answers treated according to rule.
+- Unit tests compare the TypeScript scorer against all 20 supplied synthetic v1.1 vectors, including class means, same-domain deltas, team weighting, ties, flat profiles, validation, and fixed-sum properties.
+- Worker/D1 smoke tests cover activity version pinning, all 30 answers, autosave and submission, result release, named trainer analytics, preserved R/P and integrated fields, presenter identity isolation, minimum-n/complementary suppression, session deduplication, CSV, reset, and stale generations.
+- Run `npm test`, `npm run smoke`, `npm run typecheck`, `npm run lint`, `npm run build`, and `npm run db:migrate` for local checks.
+- Psychometric validation, legal/usage review, Vietnamese localization, production secrets, remote D1, and Cloudflare deployment remain separate work. Do not describe the instrument as validated until independent validation is completed.

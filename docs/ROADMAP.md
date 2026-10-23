@@ -1,6 +1,6 @@
 # Implementation roadmap — build in small verified batches
 
-**As of 2026-10-22:** Concept and StyleGuide are agreed. Implementation has **not started**. Estimates and schedules are deliberately omitted; track completed tests, not invented percentages.
+**As of 2026-10-23:** The existing single-owner Cloudflare app includes local end-to-end Reflection Wall v1.0, SCARF Assessment with v1.1 scoring, Poll v1.2, Word Cloud v1.0, and Learning Behaviors Reflection v1.0. SCARF uses the v0.2 question bank and remains experimental/unvalidated. Latest local checks pass. The existing production deployment has not been updated with LBR v1.0 or migration 0011.
 
 ## Phase 01 — Design system integration
 - B01a: Brand rename and design tokens/components (`TrainerPopp!Kit` rather than legacy name in PDF).
@@ -18,19 +18,39 @@
 - Acceptance: guest can join without account, owner sees count, invalid/expired PIN fails safely, refresh/retry does not duplicate participant/submission.
 
 ## Phase 04 — SCARF specialized tool
-- B04a: **Use demo data only** to implement questionnaire renderer and UI while waiting for approved item bank/scoring.
-- B04b: once approved, implement versioned item set, scoring, data persistence, individual result and tests.
-- Acceptance: correct scoring against agreed fixtures; five dimensions correctly labeled; privacy enforced.
+- B04a: **Done:** implement the user-provided 30-item English v0.2 candidate bank as experimental content; follow P01–P08 and retain clear validation disclaimers.
+- B04b: **Done locally:** v1.1 scoring adds the Integrated Needs Profile while preserving Reaction Intensity and Driver Priority; versioned server scoring, participant autosave/resume, result release, personal results, additive migration, audit/reset and supplied-vector tests are implemented.
+- Acceptance: scoring formulas match the supplied bank; all five domains are correctly labelled; no dimension/scoring keys reach participant questions; trainer and presenter access are separated.
 
 ## Phase 05 — Live results / Presenter
-- B05a: trainer progress, reveal policy, group summary and heatmap in two modes.
-- B05b: presenter same-screen and separate-screen; server-controlled publication, named/anonymous safeguards and polling sync.
-- Acceptance: controlled demonstration of a realistic 20–50-person session; participant data remains private until permitted; views and team filters give correct calculations; viewer can recover from disconnect.
+- B05a: **Done locally:** trainer progress, required release mode, preserved reaction/priority measures, Integrated Needs individual/team heatmaps, named individual detail, activity/session CSV export and trainer reset.
+- B05b: **Done locally:** distinct short-lived activity/session presenter capabilities, compatible/released session aggregation with identity deduplication, aggregate-only Integrated Needs output, five-person threshold and whole-team/complementary suppression.
+- Acceptance: local smoke covers release, aggregate threshold, suppression, named owner analytics and stale-generation rejection. A live 20–50-person workshop and remote browser verification remain operational validation work.
 
-## Phase 06 — Stabilization, then expansion
-- B06a: exploratory load tests, D1 limit checks, backups/recovery, accessibility, logs, low-cost hosting monitoring.
-- B06b (later): Reflection/Learning Behavior as **second distinct tool** to prove modular approach; simple builder after needs are validated.
+## Phase 06 — Poll Module v1.2
+- B07a: **Done locally:** native Poll activity schema and lifecycle, Single/Multiple Choice, Other, Anonymous/Named modes, standalone and Session flows, Session identity reuse, direct and Session QR/link/PIN entry.
+- B07b: **Done locally:** participant vote/edit/wait/results states; trainer live control, analytics, visibility controls, CSV export and archive access; aggregate-only fullscreen Presenter; rate limiting, HMAC response identity and idempotent writes.
+- Acceptance: `npm test` passes 21 tests; `npm run smoke` passes 715 local Worker/D1 assertions including 200 simultaneous votes distributed across three Live Session Polls. A-01/A-02 stay provisional. All eight UI screen families are implemented; pixel-diff comparison and live workshop review remain unverified.
+
+## Phase 07 — Stabilization, then expansion
+- B06a: **Remaining:** larger/remote D1 capacity checks beyond the local 200-vote run, backups/recovery, accessibility audit, logs, low-cost hosting monitoring, psychometric validation and any legal/usage review.
+- B06b: **Done locally:** Learning Behaviors Reflection v1.0 is implemented as a distinct activity module with its own locked content, participant/peer flow, personal reflection, trainer analytics, and aggregate-only Presenter.
 - Acceptance: one real trainer-led class succeeds end-to-end; meaningful defects tracked and resolved; next tool does not require redesigning core session/join/presenter models.
+
+## Phase 08 — Word Cloud v1.0
+- B08a: **Done locally:** native anonymous activity schema and lifecycle, standalone and Session/team entry, 1–10 normalized word submission, device-local draft and one-time submit, moderation and distinct-submitter frequency, results/export and aggregate-only Presenter.
+- B08b: **Done locally:** responsive trainer and participant views, Archive/Live/Home/Tools/Session navigation, close race guard, safe duplicate/delete behavior, and 200-submission local Worker/D1 load smoke.
+- Acceptance: `npm test` passes 28 tests; `npm run smoke` passes 967 local Worker/D1 assertions including 200 near-simultaneous anonymous submissions. Migrations 0005/0006 are applied locally. Pixel-diff fidelity and remote Cloudflare deployment remain unverified.
+
+## Phase 09 — Reflection Wall v1.0
+- B09a: **Done locally:** additive D1 schema, trainer setup, scoped participant actors, anonymous/named modes, Session/Activity navigation, code/link join, lifecycle, Post-its, comments, six reactions, moderation and reversible clustering.
+- B09b: **Done locally:** content-free event cursor polling, trainer analytics and safe CSV, Presenter capability and Off/All/Focus/Spotlight/Cluster/Blank modes, responsive participant layout and archive/reopen.
+- Acceptance: `npm test` passes 32 tests; `npm run smoke` passes 1,017 local Worker/D1 assertions, including 200 simultaneous Reflection Wall submissions, access revoke/rotate, moderation audit notes and first-post column locking. Migrations 0007–0009 are applied locally. Browser accessibility inspection covers trainer overview/editor; live workshop, network reconnect/device behavior, pixel-diff fidelity and remote Cloudflare deployment remain unverified.
+
+## Phase 10 — Learning Behaviors Reflection v1.0
+- B10a: **Done locally:** Additive D1 schema and seed for the six locked behaviors; trainer setup, live controls and team/individual analytics; temporary participant Self ratings, peer rounds, Quick Notes, My Reflection and My Actions; session-linked and standalone entry; completion/reopen lifecycle.
+- B10b: **Done locally:** Aggregate-only Presenter with six group Self means and respondent counts; participant disclosure; privacy-scoped peer form; edit freeze after first Self response; write guards, revisions, idempotent peer submit and safe exports.
+- Acceptance: `npm test` passes 42 tests; isolated Worker/D1 LBR walkthrough passes 23 assertions; existing `npm run smoke` passes 1,020 Worker/D1 regression assertions. `npm run typecheck`, `npm run lint`, `npm run build`, and `git diff --check` pass. Local migration 0011 is applied. Trainer setup/live, participant Intro/Self and Presenter were visually checked in the browser; numeric pixel fidelity, live workshop/UAT and remote deployment remain unverified.
 
 ## Per-batch handoff template
 

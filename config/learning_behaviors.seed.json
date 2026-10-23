@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "tool_key": "learning-behaviors-reflection",
+  "activity_title": "Learning Behaviors Reflection",
+  "frequency_context": "Trong quá trình làm việc cùng nhau nói chung",
+  "scale": [
+    {"value": 1, "label_vi": "Chưa bao giờ / Gần như không", "label_en": "Never / Almost never"},
+    {"value": 2, "label_vi": "Hiếm khi", "label_en": "Rarely"},
+    {"value": 3, "label_vi": "Thỉnh thoảng", "label_en": "Sometimes"},
+    {"value": 4, "label_vi": "Thường xuyên", "label_en": "Often"},
+    {"value": 5, "label_vi": "Gần như mỗi khi có cơ hội", "label_en": "Almost whenever there is an opportunity"}
+  ],
+  "not_applicable": {"value": "NA", "label_vi": "Chưa đủ cơ hội quan sát/đánh giá", "label_en": "Not enough opportunity to observe"},
+  "minimum_recommended_peers": 3,
+  "minimum_required_peers": 0,
+  "behaviors": [
+    {"key": "asking_questions", "number": 1, "name": "Asking Questions", "short_name": "Asking Questions", "description_vi": "Chủ động đặt câu hỏi để hiểu rõ hơn, làm rõ giả định hoặc tìm hiểu điều chưa biết.", "example_vi": "Khi quyết định trong cuộc họp chưa rõ, tôi đặt câu hỏi để cả nhóm hiểu đúng vấn đề.", "reflection_prompt_vi": "Khi nào tôi đã chủ động hỏi dù còn ngại mình hỏi điều hiển nhiên?"},
+    {"key": "sharing_information", "number": 2, "name": "Sharing Information", "short_name": "Sharing Information", "description_vi": "Chủ động chia sẻ thông tin, hiểu biết và góc nhìn hữu ích cho người khác.", "example_vi": "Tôi chia sẻ một bài học hoặc dữ liệu quan trọng trước khi đồng đội cần hỏi.", "reflection_prompt_vi": "Tôi đã giúp đồng đội ra quyết định tốt hơn nhờ chia sẻ điều gì?"},
+    {"key": "seeking_help", "number": 3, "name": "Seeking Help", "short_name": "Seeking Help", "description_vi": "Sẵn sàng thừa nhận khi cần hỗ trợ và chủ động tìm người có thể giúp mình.", "example_vi": "Khi bị mắc kẹt trong công việc, tôi sớm nhờ đồng nghiệp trao đổi thay vì tự xoay xở quá lâu.", "reflection_prompt_vi": "Gần đây tôi đã chủ động nhờ ai hỗ trợ và học được điều gì?"},
+    {"key": "experimenting", "number": 4, "name": "Experimenting with Unproven Actions", "short_name": "Experimenting", "description_vi": "Thử nghiệm cách làm mới khi chưa chắc kết quả, quan sát và điều chỉnh từ những gì học được.", "example_vi": "Tôi thử một cách tiếp cận mới trong phạm vi an toàn và dùng phản hồi để cải thiện.", "reflection_prompt_vi": "Có điều gì tôi đã thử dù chưa có bảo đảm thành công?"},
+    {"key": "talking_about_mistakes", "number": 5, "name": "Talking About Mistakes", "short_name": "Talking About Mistakes", "description_vi": "Cởi mở trao đổi về những sai sót và bài học từ sai sót để cả nhóm tiến bộ.", "example_vi": "Tôi chia sẻ một việc chưa đạt kỳ vọng và cùng đồng đội tìm cách tránh lặp lại.", "reflection_prompt_vi": "Tôi đã chia sẻ sai sót của mình một cách xây dựng trong tình huống nào?"},
+    {"key": "seeking_feedback", "number": 6, "name": "Seeking Feedback", "short_name": "Seeking Feedback", "description_vi": "Chủ động xin phản hồi về cách mình làm việc và xem xét điều có thể cải thiện.", "example_vi": "Sau một buổi trình bày, tôi hỏi đồng nghiệp điều gì hiệu quả và điều gì nên làm khác đi.", "reflection_prompt_vi": "Tôi đã chủ động hỏi ai về một điều mình có thể cải thiện?"}
+  ]
+}

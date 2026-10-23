@@ -2,7 +2,7 @@
 
 A trainer-owned facilitation workspace for sessions and interactive activities. Trainers can create a session or quick activity; participants join from a QR code, link, or six-digit PIN without creating accounts. The trainer controls result visibility and presenter output.
 
-The first module is a **SCARF demonstrator**. All questions and scoring are labeled DEMO and remain experimental. This app does not include official SCARF items or claim validated psychometric results.
+Available activities include **Reflection Wall**, Poll, anonymous Word Cloud, and **SCARF Assessment**. Reflection Wall supports anonymous or named Post-its, comments, reactions, trainer moderation, clusters and a live Presenter screen. Word Cloud stores anonymous submissions and exposes aggregate results to trainers and Presenter screens. SCARF uses the supplied 30-item v0.2 question bank with scoring v1.1; it is an experimental candidate instrument, not an official NLI questionnaire or validated psychometric assessment.
 
 ## Run locally
 

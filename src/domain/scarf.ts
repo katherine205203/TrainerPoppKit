@@ -14,11 +14,11 @@ export type DemoScores = Record<ScarfDimension, number>;
 
 /** Placeholder wording for interface and flow validation only. Not a licensed or validated instrument. */
 export const DEMO_ITEMS = [
-  { id: 1, dimension: "Status", prompt: "In a group, recognition for my contribution helps me stay engaged." },
-  { id: 2, dimension: "Certainty", prompt: "Knowing what to expect makes it easier for me to contribute." },
-  { id: 3, dimension: "Autonomy", prompt: "Having choices in how I approach a task matters to me." },
-  { id: 4, dimension: "Relatedness", prompt: "Feeling included by the people I work with matters to me." },
-  { id: 5, dimension: "Fairness", prompt: "Understanding how decisions are made helps me trust a group." },
+  { id: 1, dimension: "Status", prompt: "Recognition helps me stay engaged." },
+  { id: 2, dimension: "Certainty", prompt: "Knowing what to expect helps me contribute." },
+  { id: 3, dimension: "Autonomy", prompt: "I have choices in how I approach my work." },
+  { id: 4, dimension: "Relatedness", prompt: "Feeling included helps me do my best." },
+  { id: 5, dimension: "Fairness", prompt: "Fair decisions help me trust a group." },
 ] as const;
 
 export function validateDemoAnswers(input: unknown, requireComplete = false): input is DemoAnswers {
