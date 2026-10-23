@@ -292,9 +292,8 @@ export function ActivitySetupPage() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save activity."); }
     finally { setPending(false); }
   }
-  return <div className="page-stack activity-setup-page"><div className="breadcrumb"><Link to="/tools">My Tools</Link><ChevronRight size={15} /><span>SCARF / Activity setup</span></div><PageIntro eyebrow="STEP 1 OF 5 · SET UP" title="Set up SCARF" description="Make this activity yours — decide how people join, respond and see results." />
+  return <div className="page-stack activity-setup-page"><div className="breadcrumb"><Link to="/tools">My Tools</Link><ChevronRight size={15} /><span>SCARF / Activity setup</span></div><PageIntro eyebrow="ACTIVITY SETUP" title="Set up SCARF" description="Make this activity yours — decide how people join, respond and see results." />
     {sessionError && <ErrorState message={sessionError} />}
-    <div className="stepper" aria-label="Activity setup steps"><span className="step-active"><b>1</b>Basics</span><span><b>2</b>Participants</span><span><b>3</b>Questions &amp; scoring</span><span><b>4</b>Results visibility</span><span><b>5</b>Review</span></div>
     <form className="setup-grid" onSubmit={submit}><div className="setup-main">
       <Card className="form-card"><div className="form-section-heading"><span>ACTIVITY DETAILS</span><Badge tone="orange">Experimental v0.2</Badge></div><div className="tool-mini-header"><span className="mini-tool-art"><Mascot kind="sun" /></span><span><strong>SCARF Assessment</strong><small>{SCARF_DIMENSIONS.join(" · ")}</small></span></div>
         <label className="field-label" htmlFor="activity-title">Activity title</label><input className="text-input" id="activity-title" required maxLength={100} value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
