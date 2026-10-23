@@ -192,8 +192,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .quick-session > .mascot { color: var(--brand-blue, #3939ff); }
 .quick-reflection { color: #fff; background: var(--brand-electric); }
 .quick-reflection > .mascot { color: var(--brand-pink); }
-.quick-checkin { color: #1d1d2a; background: var(--brand-pink); }
-.quick-checkin > .mascot { color: var(--brand-gold); }
+.quick-learning { color: #1d1d2a; background: var(--brand-arctic); }
+.quick-learning > .mascot { color: var(--brand-electric); }
 .quick-poll { color: #1d1d2a; background: var(--brand-arctic); }
 .quick-poll > .mascot { color: var(--brand-orange); }
 .quick-wordcloud { color: #fff; background: var(--brand-electric); }
