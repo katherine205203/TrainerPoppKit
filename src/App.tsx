@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Link, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
-  Bell, LogOut, Menu, Plus, Radio, Search, Settings, X,
+  Bell, LogOut, Menu, Radio, Settings, X,
 } from "lucide-react";
 import { api, post } from "./api";
 import { AuthProvider } from "./AuthProvider";
@@ -85,22 +85,9 @@ function OwnerLayout() {
   const { signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
-  const query = new URLSearchParams(location.search).get("search") ?? "";
-  const isToolWorkspace = location.pathname.startsWith("/tools/")
-    || /^\/(?:activities\/(?:new|[^/]+\/(?:live|presenter))|results\/[^/]+|polls(?:\/|$)|wordclouds(?:\/|$)|reflection-walls(?:\/|$)|learning-behaviors(?:\/|$))/.test(location.pathname);
-  const isQuietWorkspace = isToolWorkspace || location.pathname === "/archive" || /^\/sessions(?:\/|$)/.test(location.pathname);
 
   function showHelp() {
     window.alert("TrainerPopp!Kit is a personal facilitation workspace. Participant results stay private until you reveal them.");
-  }
-
-  function search(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const query = String(new FormData(event.currentTarget).get("search") ?? "");
-    const destination = location.pathname.startsWith("/sessions") ? "/sessions" : "/tools";
-    navigate(`${destination}${query.trim() ? `?search=${encodeURIComponent(query.trim())}` : ""}`);
-    setMobileOpen(false);
   }
 
   return <div className="owner-app">
@@ -113,10 +100,7 @@ function OwnerLayout() {
       <div className="sidebar-bottom"><button type="button" className="side-link side-action notification-side-action" aria-label="Help and guidance" title="Help and guidance" onClick={showHelp}><Bell size={20} /><span>Help and guidance</span><i className="sidebar-notification-dot" /></button><button type="button" className="side-link side-action" onClick={() => navigate("/settings")}><Settings size={20} /><span>Settings</span></button><button type="button" className="trainer-chip" onClick={() => void signOut()}><span className="trainer-avatar"><Mascot kind="bean" /></span><span><strong>My Trainer Space</strong><small>Owner account</small></span><LogOut size={17} /></button></div>
     </aside>
     <div className="main-column">
-      <header className={`topbar ${isQuietWorkspace ? "topbar-quiet" : ""}`}><button className="mobile-menu" aria-label={mobileOpen ? "Close menu" : "Open menu"} onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button>
-        {!isQuietWorkspace && <form className="top-search" onSubmit={search}><Search size={15} /><input key={`${location.pathname}${location.search}`} name="search" aria-label="Search tools" defaultValue={query} placeholder="Search tools, sessions, or anything…" /></form>}
-        {!isQuietWorkspace && <div className="topbar-actions"><Button variant="orange" to="/activities/new" icon={<Plus size={14} />}>Create activity</Button></div>}
-      </header>
+      <header className="topbar"><button className="mobile-menu" aria-label={mobileOpen ? "Close menu" : "Open menu"} onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button></header>
       <main className="owner-content"><Outlet /></main>
     </div>
     {mobileOpen && <button aria-label="Close navigation" className="sidebar-scrim" onClick={() => setMobileOpen(false)} />}
