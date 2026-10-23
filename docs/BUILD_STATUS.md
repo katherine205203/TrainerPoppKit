@@ -1,5 +1,13 @@
 # Build status
 
+## Latest cross-tool audit — 2026-10-23
+
+- Production `/api/health` returned 200 with D1 and owner authentication configured. The public client bundle contains the Learning Behaviors Reflection module, and the remote D1 migration list reports no pending migrations. No authenticated production owner or six-participant workshop flow was exercised.
+- Local verification passed: 42 unit tests, typecheck, lint, build, 1,020 general Worker/D1 smoke assertions, and a separate six-participant LBR Worker/D1 walkthrough with 144 assertions. All test-created activity rows were removed from local D1.
+- Removed four misleading SCARF “demo activity” cards that all opened the same assessment. The detail page now describes the three real response sections. Corrected the active-tool count and the false Demo Only notice on real SCARF Presenter controls. These audit UI corrections are deployed in Cloudflare Worker version `126f879a-59df-4128-9d1b-4f7fbf7edda0`; the production bundle serves the new response-section view and no longer contains the removed fake cards.
+- Build warning remains: the main client JavaScript chunk is approximately 620 kB, above Vite’s 500 kB warning threshold. The build script removes the copied local `.dev.vars` artifact before exit.
+- Removed a local test credential value from this status document. Keep local credentials only in ignored `.dev.vars`; never write them to documentation or logs.
+
 ## SCARF Product Pack v1.2 — current milestone
 
 - Safely extracted the supplied ZIP into `reference_packs/SCARF_Product_Pack_v1.2/` without overwriting unrelated files. Read the complete Product Specification, v1.1 scoring addendum and engine, all 20 reference vectors, Question Bank JSON, Codex Handoff, UI Reference Guide, and all participant/trainer/presenter and app-shell mockups.
@@ -23,7 +31,7 @@
 - Resume state: local implementation and verification are complete. Before deployment, apply migrations 0007–0009 to a newly provisioned remote D1, configure production secrets, deploy through the existing Cloudflare pipeline, then perform authenticated trainer and participant acceptance checks.
 
 
-Status: Reflection Wall v1.0, Poll v1.2, SCARF v1.1, Word Cloud v1.0, and Learning Behaviors Reflection v1.0 implemented and verified locally — numeric UI similarity unverified; the existing production deployment does not include LBR.
+Status: Reflection Wall v1.0, Poll v1.2, SCARF v1.1, Word Cloud v1.0, and Learning Behaviors Reflection v1.0 are implemented. Production health, client bundle presence and current remote migrations were verified; authenticated live-class UAT and numeric UI similarity remain unverified.
 Last updated: 2026-10-23
 
 ## Poll Module v1.2 — current milestone
@@ -101,7 +109,7 @@ Last updated: 2026-10-23
 - Poll vote records use a keyed HMAC of Poll + participant identity; Anonymous responses have no participant foreign-key mapping. Session completion names are returned separately. Presenter and Participant APIs only receive aggregate results after Reveal and configuration allow it.
 - Poll public entry/voting rate limits allow workshop cohorts sharing a venue IP; vote retries are idempotent, and a participant has one effective response per Poll.
 - The older demo presenter can show names only if the trainer enables names and the participant opted in. SCARF presenter access is always aggregate-only, read-only, short-lived, and carried in a URL fragment.
-- Local owner credentials live in ignored `.dev.vars` with mode `0600`; the temporary owner password was set to `000000` at the user's request. Never print or commit this file. Replace it before any shared or production environment.
+- Local owner credentials live only in ignored `.dev.vars` with mode `0600`. Do not print, document, or commit credential values; replace temporary local credentials before any shared use.
 - Cloudflare Vite copies local `.dev.vars` into `dist/worker` during its build. `npm run build` now uses `scripts/build.mjs` to remove that copied file even when the Vite build fails; the deploy script calls this guarded build. The latest artifact check confirmed no `.dev.vars` copy, owner-password assignment, or signing secret in the worker output.
 
 ## Local commands and results
@@ -139,9 +147,9 @@ Last updated: 2026-10-23
 
 ## Resume checklist
 
-1. Cloudflare device authorization, production D1, migrations 0001–0010, production secrets, and the pre-LBR `workers.dev` deployment are complete. Migration 0011 is applied locally only; production does not yet include Learning Behaviors Reflection.
+1. Cloudflare device authorization, production D1, migrations 0001–0011 and production secrets are in place; the Worker and public LBR bundle are deployed. Authenticated owner/participant UAT remains outstanding.
 2. If the Cloudflare OAuth session expires, rerun `npm exec wrangler -- login --device`.
-3. For an authorized LBR rollout, apply migration 0011 to production, run `npm run deploy`, then verify `/api/health` and owner-route access.
+3. Next, run authenticated trainer and participant acceptance with a controlled six-person group; production deployment, D1 migrations and anonymous owner-route denial have already been checked.
 
 ## Known limitations
 
@@ -156,4 +164,4 @@ Last updated: 2026-10-23
 - Implemented trainer setup, live phase controls, team/individual analytics and detail, CSV export, temporary participant flow, Self rating and lock, peer feedback rounds, private Quick Notes, My Reflection, optional My Actions, completion, archive/reopen handling, and Presenter Mode. Presenter receives only six group Self means and counts; it does not receive peer ratings or individual identities. Participant join disclosure explains trainer access and the shared-device Quick Note transition.
 - Verification: `npm test` → 9 files / 42 tests passed; isolated disposable Worker/D1 API walkthrough → 23 assertions passed; existing `npm run smoke` → 1,020 local Worker/D1 regression assertions passed. `npm run typecheck`, `npm run lint`, `npm run build`, and `git diff --check` passed. Browser review covered trainer overview/setup, participant Intro/Self, and Presenter; no pixel-diff was run. The production build retains a non-blocking >500 kB main client chunk warning; LBR itself is code-split into a separate ~70 kB chunk.
 - The preexisting submitted-peer-answer delete guard remains intact. Automatic review rejected dropping that guard for cascade cleanup, and no such cleanup migration was kept; the LBR flows do not expose hard deletion of submitted answers. The disposable test database was removed after verification.
-- No remote database migration or deployment was run. The existing production deployment remains on its prior schema and does not include migration 0011 or this module. Apply migration 0011 and deploy through the existing Cloudflare pipeline when production rollout is authorized.
+- At the time this module milestone was completed, no remote migration or deployment had yet been run. A later rollout is recorded in the latest cross-tool audit above.

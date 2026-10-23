@@ -1,6 +1,6 @@
 # Implementation roadmap — build in small verified batches
 
-**As of 2026-10-23:** The existing single-owner Cloudflare app includes local end-to-end Reflection Wall v1.0, SCARF Assessment with v1.1 scoring, Poll v1.2, Word Cloud v1.0, and Learning Behaviors Reflection v1.0. SCARF uses the v0.2 question bank and remains experimental/unvalidated. Latest local checks pass. The existing production deployment has not been updated with LBR v1.0 or migration 0011.
+**As of 2026-10-23:** The single-owner Cloudflare app includes Reflection Wall v1.0, SCARF Assessment with v1.1 scoring, Poll v1.2, Word Cloud v1.0, and Learning Behaviors Reflection v1.0. SCARF uses the v0.2 question bank and remains experimental/unvalidated. Production health returns 200, its public client bundle contains LBR, and the remote D1 migration list has no pending migrations. Authenticated production trainer and six-person participant UAT remain unverified.
 
 ## Phase 01 — Design system integration
 - B01a: Brand rename and design tokens/components (`TrainerPopp!Kit` rather than legacy name in PDF).
@@ -45,12 +45,12 @@
 ## Phase 09 — Reflection Wall v1.0
 - B09a: **Done locally:** additive D1 schema, trainer setup, scoped participant actors, anonymous/named modes, Session/Activity navigation, code/link join, lifecycle, Post-its, comments, six reactions, moderation and reversible clustering.
 - B09b: **Done locally:** content-free event cursor polling, trainer analytics and safe CSV, Presenter capability and Off/All/Focus/Spotlight/Cluster/Blank modes, responsive participant layout and archive/reopen.
-- Acceptance: `npm test` passes 32 tests; `npm run smoke` passes 1,017 local Worker/D1 assertions, including 200 simultaneous Reflection Wall submissions, access revoke/rotate, moderation audit notes and first-post column locking. Migrations 0007–0009 are applied locally. Browser accessibility inspection covers trainer overview/editor; live workshop, network reconnect/device behavior, pixel-diff fidelity and remote Cloudflare deployment remain unverified.
+- Acceptance: `npm test` passes 32 tests; `npm run smoke` passes 1,017 local Worker/D1 assertions, including 200 simultaneous Reflection Wall submissions, access revoke/rotate, moderation audit notes and first-post column locking. Migrations 0007–0009 are applied locally. Browser accessibility inspection covers trainer overview/editor; live workshop, network reconnect/device behavior, pixel-diff fidelity and authenticated production UAT remain unverified.
 
 ## Phase 10 — Learning Behaviors Reflection v1.0
 - B10a: **Done locally:** Additive D1 schema and seed for the six locked behaviors; trainer setup, live controls and team/individual analytics; temporary participant Self ratings, peer rounds, Quick Notes, My Reflection and My Actions; session-linked and standalone entry; completion/reopen lifecycle.
 - B10b: **Done locally:** Aggregate-only Presenter with six group Self means and respondent counts; participant disclosure; privacy-scoped peer form; edit freeze after first Self response; write guards, revisions, idempotent peer submit and safe exports.
-- Acceptance: `npm test` passes 42 tests; isolated Worker/D1 LBR walkthrough passes 23 assertions; existing `npm run smoke` passes 1,020 Worker/D1 regression assertions. `npm run typecheck`, `npm run lint`, `npm run build`, and `git diff --check` pass. Local migration 0011 is applied. Trainer setup/live, participant Intro/Self and Presenter were visually checked in the browser; numeric pixel fidelity, live workshop/UAT and remote deployment remain unverified.
+- Acceptance: `npm test` passes 42 tests; the local six-participant Worker/D1 LBR walkthrough passes 144 assertions; `npm run smoke` passes 1,020 Worker/D1 regression assertions. `npm run typecheck`, `npm run lint`, `npm run build`, and `git diff --check` pass. Local migration 0011 is applied. Trainer setup/live, participant Intro/Self and Presenter were visually checked in the browser; numeric pixel fidelity, live workshop/UAT and authenticated production acceptance remain unverified.
 
 ## Per-batch handoff template
 
