@@ -107,8 +107,8 @@ function OwnerLayout() {
     </aside>
     <div className="main-column">
       <header className="topbar"><button className="mobile-menu" aria-label={mobileOpen ? "Close menu" : "Open menu"} onClick={() => setMobileOpen(!mobileOpen)}>{mobileOpen ? <X /> : <Menu />}</button>
-        <form className="top-search" onSubmit={search}><Search size={19} /><input aria-label="Search tools" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tools, sessions, or anything…" /></form>
-        <div className="topbar-actions">{isSessionList ? <Button variant="orange" to="/sessions/new" icon={<Plus size={18} />}>Create session</Button> : <Button variant="orange" to="/activities/new" icon={<Plus size={18} />}>Create activity</Button>}<button className="help-button" title="Help and guidance" onClick={() => window.alert("TrainerPopp!Kit is a personal facilitation workspace. Participant results stay private until you reveal them.")}><Bell size={19} /><span className="help-dot" /></button></div>
+        <form className="top-search" onSubmit={search}><Search size={15} /><input aria-label="Search tools" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tools, sessions, or anything…" /></form>
+        <div className="topbar-actions">{isSessionList ? <Button variant="orange" to="/sessions/new" icon={<Plus size={14} />}>Create session</Button> : <Button variant="orange" to="/activities/new" icon={<Plus size={14} />}>Create activity</Button>}<button className="help-button" title="Help and guidance" onClick={() => window.alert("TrainerPopp!Kit is a personal facilitation workspace. Participant results stay private until you reveal them.")}><Bell size={15} /><span className="help-dot" /></button></div>
       </header>
       <main className="owner-content"><Outlet /></main>
     </div>
