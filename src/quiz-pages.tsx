@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useMatch, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Check, Clock3, Copy, Download, Plus, RotateCcw, Users } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { api, post } from "./api";
@@ -78,7 +78,7 @@ export function QuizLibraryPage() {
 }
 
 export function QuizBuilderPage() {
-  const {definitionId}=useParams(), navigate=useNavigate(), isNew=definitionId==="new";
+  const {definitionId}=useParams(), navigate=useNavigate(), newRoute=useMatch("/quiz/definitions/new"), isNew=definitionId==="new" || Boolean(newRoute);
   const [params]=useSearchParams();
   const stored=useQuizPoll<{definition:{id:string;status:string;published_version:number;content:QuizContent}}>(isNew?null:"/owner/quiz/definitions/"+definitionId);
   const [quiz,setQuiz]=useState<QuizContent>(emptyQuiz),[selected,setSelected]=useState(0),[preview,setPreview]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(""),[success,setSuccess]=useState("");
