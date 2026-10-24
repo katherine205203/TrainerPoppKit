@@ -29,6 +29,11 @@ const SessionPresenterStateBody = z.object({
   teamName: z.string().trim().max(80).nullable(),
   layer: z.enum(["reaction", "priority"]),
 });
+const PresenterActivityStateBody = z.object({
+  stage: z.enum(["lobby", "closed_waiting", "heatmap_revealed"]),
+  view: z.enum(["individual", "team"]).default("individual"),
+  comparison: z.enum(["personal_pattern", "compared_to_class"]).default("personal_pattern"),
+});
 const ProgressBody = z.object({ generation: z.number().int().min(1), currentQuestion: z.number().int().min(1).max(30), viewState: z.enum(["welcome", "question", "transition", "completed"]) });
 const AnswerBody = z.object({
   generation: z.number().int().min(1),
@@ -66,19 +71,24 @@ function newId(): string { return crypto.randomUUID(); }
 
 type ScarfActivityRow = {
   id: string; session_id: string | null; title: string; state: string; tool_id: string;
-  require_name: number; allow_teams: number; join_pin: string | null; session_name: string | null;
+  require_name: number; allow_teams: number; join_pin: string | null; access_slug: string; session_name: string | null;
   instrument_key: string; instrument_version: string; scoring_version: string; locale: string;
   content_hash: string; release_mode: "immediate" | "trainer_released"; results_released_at: string | null;
   release_locked_at: string | null; team_mode: string; revealed: number; comparison_basis: string;
   selected_team_id: string | null; show_names: number; prompt_index: number; scarf_layer: "reaction" | "priority";
+  presenter_stage: "lobby" | "closed_waiting" | "heatmap_revealed";
+  presenter_view: "individual" | "team";
+  presenter_comparison: "personal_pattern" | "compared_to_class";
+  presentation_updated_at: string;
 };
 
 async function activityWithConfig(db: D1Database, activityId: string): Promise<ScarfActivityRow | null> {
   return db.prepare(`
-    SELECT a.id, a.session_id, a.title, a.state, a.tool_id, a.require_name, a.allow_teams, a.join_pin,
+    SELECT a.id, a.session_id, a.title, a.state, a.tool_id, a.require_name, a.allow_teams, a.join_pin, a.access_slug,
       s.name AS session_name, cfg.instrument_key, cfg.instrument_version, cfg.scoring_version, cfg.locale,
       cfg.content_hash, cfg.release_mode, cfg.results_released_at, cfg.release_locked_at, cfg.team_mode,
-      ps.revealed, ps.comparison_basis, ps.selected_team_id, ps.show_names, ps.prompt_index, ps.scarf_layer
+      ps.revealed, ps.comparison_basis, ps.selected_team_id, ps.show_names, ps.prompt_index, ps.scarf_layer,
+      ps.presenter_stage, ps.presenter_view, ps.presenter_comparison, ps.updated_at AS presentation_updated_at
     FROM activities a
     JOIN scarf_activity_configs cfg ON cfg.activity_id = a.id
     LEFT JOIN sessions s ON s.id = a.session_id
@@ -105,6 +115,7 @@ export async function createScarfParticipation(db: D1Database, activityId: strin
 export async function scarfOwnerActivity(db: D1Database, activityId: string) {
   const activity = await activityWithConfig(db, activityId);
   if (!activity) return null;
+  const presenterStage = activity.state === "closed" ? activity.presenter_stage : "lobby";
   const teams = await db.prepare("SELECT id, name FROM teams WHERE activity_id = ? ORDER BY created_at").bind(activityId).all<{ id: string; name: string }>();
   const counts = await db.prepare(`
     SELECT COUNT(*) AS joined,
@@ -128,7 +139,7 @@ export async function scarfOwnerActivity(db: D1Database, activityId: string) {
   return {
     activity: {
       id: activity.id, session_id: activity.session_id, session_name: activity.session_name, title: activity.title,
-      tool_id: activity.tool_id, state: activity.state, join_pin: activity.join_pin,
+      tool_id: activity.tool_id, state: activity.state, join_pin: activity.join_pin, access_slug: activity.access_slug,
       require_name: activity.require_name, allow_teams: activity.allow_teams,
       instrument_version: activity.instrument_version, scoring_version: activity.scoring_version,
     },
@@ -142,9 +153,13 @@ export async function scarfOwnerActivity(db: D1Database, activityId: string) {
     counts: { joined: Number(counts?.joined ?? 0), submitted: Number(counts?.submitted ?? 0), inProgress: Number(counts?.in_progress ?? 0), savedDrafts: Number(counts?.saved_drafts ?? 0) },
     participants: participants.results,
     presentation: {
-      revealed: activity.revealed, comparison_basis: activity.comparison_basis,
+      revealed: presenterStage === "heatmap_revealed" ? 1 : 0, comparison_basis: activity.comparison_basis,
       selected_team_id: activity.selected_team_id, show_names: activity.show_names,
       scarf_layer: activity.scarf_layer,
+      stage: presenterStage,
+      view: activity.presenter_view,
+      comparison: activity.presenter_comparison,
+      updatedAt: activity.presentation_updated_at,
     },
   };
 }
@@ -316,7 +331,9 @@ export async function getScarfAnalytics(db: D1Database, scope: "activity" | "ses
       classCount: needsCohort.length,
       classMean,
       classRank: classRanks,
-      comparisonAvailable: needsCohort.length >= 5,
+      // A class comparison needs a reference cohort, but a single submitted
+      // participant must still be revealable in Individual view.
+      comparisonAvailable: needsCohort.length >= 2,
       participants: selectedNeeds.map(({ row, scores }) => ({ id: row.participant_id, displayName: row.display_name, teamName: row.team_name ?? "Unassigned",
         needsIndex: scores.integratedNeedsIndex, needsRank: scores.integratedNeedsRank,
         classDelta: classMean ? Object.fromEntries(SCARF_DOMAIN_CODES.map((code) => [code, scores.integratedNeedsIndex![code] - classMean[code]])) as ScarfDomainScores : null })),
@@ -356,7 +373,7 @@ export async function scarfOwnerRoute(request: Request, env: ScarfEnv, url: URL)
   const db = database(env);
   if (!db) return fail("D1 database is not configured.", 503);
 
-  const activityRoute = url.pathname.match(/^\/api\/owner\/scarf\/activities\/([0-9a-f-]+)(?:\/(analytics|release|presenter-session|export\.csv|participants\/([0-9a-f-]+)\/reset))?$/i);
+  const activityRoute = url.pathname.match(/^\/api\/owner\/scarf\/activities\/([0-9a-f-]+)(?:\/(analytics|release|presenter-session|presenter-state|export\.csv|participants\/([0-9a-f-]+)\/reset))?$/i);
   if (activityRoute) {
     const activityId = activityRoute[1]!;
     const action = activityRoute[2];
@@ -384,6 +401,39 @@ export async function scarfOwnerRoute(request: Request, env: ScarfEnv, url: URL)
         .bind(await sha256(token), activityId, expiresAt).run();
       await audit(db, activityId, "owner", null, "presenter_session_created", null);
       return json({ path: `/presenter#${token}`, expiresAt });
+    }
+    if (request.method === "GET" && action === "presenter-state") {
+      return json({ stage: activity.presenter_stage, view: activity.presenter_view, comparison: activity.presenter_comparison, updatedAt: activity.presentation_updated_at });
+    }
+    if (request.method === "POST" && action === "presenter-state") {
+      const data = await body(request, PresenterActivityStateBody);
+      if (!data) return fail("Invalid SCARF Presenter state.", 400);
+      if (data.stage === "heatmap_revealed" && activity.state !== "closed") {
+        return fail("Close the activity before revealing the Presenter heatmap.", 409, "ACTIVITY_NOT_CLOSED");
+      }
+      if (data.stage === "closed_waiting" && activity.state !== "closed") {
+        return fail("The activity must be closed before showing the closed Presenter screen.", 409, "ACTIVITY_NOT_CLOSED");
+      }
+      const report = await getScarfAnalytics(db, "activity", activityId, null, activity.instrument_version, activity.scoring_version, false);
+      if (data.stage === "heatmap_revealed" && !report.heatmap.available) {
+        return fail("At least one completed SCARF response is required before revealing the heatmap.", 409, "NO_SUBMITTED_RESULTS");
+      }
+      if (data.comparison === "compared_to_class" && !report.heatmap.comparisonAvailable) {
+        return fail("Compared to Class needs at least two compatible submissions. Individual Pattern remains available.", 409, "COMPARISON_NOT_AVAILABLE");
+      }
+      if (data.view === "team") {
+        const usableTeams = report.heatmap.teams.filter((team) => team.name !== "Unassigned" && team.needsIndex && team.needsRank);
+        if (!activity.allow_teams || usableTeams.length < 2) return fail("Team view needs at least two configured teams with submitted results.", 409, "TEAM_VIEW_NOT_AVAILABLE");
+      }
+      await db.prepare(`UPDATE presentation_state
+        SET presenter_stage = ?, presenter_view = ?, presenter_comparison = ?, revealed = ?,
+            comparison_basis = ?, show_names = 1, scarf_layer = 'priority', updated_at = CURRENT_TIMESTAMP
+        WHERE activity_id = ?`)
+        .bind(data.stage, data.view, data.comparison, data.stage === "heatmap_revealed" ? 1 : 0,
+          data.comparison === "compared_to_class" ? "team_relative" : "within_person", activityId).run();
+      await audit(db, activityId, "owner", null, "presenter_state_changed", null, "", data);
+      const next = await activityWithConfig(db, activityId);
+      return json({ stage: next?.presenter_stage, view: next?.presenter_view, comparison: next?.presenter_comparison, updatedAt: next?.presentation_updated_at });
     }
     if (request.method === "GET" && action === "export.csv") {
       const report = await getScarfAnalytics(db, "activity", activityId, null, activity.instrument_version, activity.scoring_version);
@@ -513,7 +563,7 @@ export async function scarfParticipantRoute(request: Request, env: ScarfEnv, url
       instrument: { version: current.instrument_version, scoringVersion: current.scoring_version, status: "experimental_not_validated" },
       progress: { generation: current.generation, currentQuestion: current.current_question, viewState: current.view_state, status: current.status, answeredCount: Object.keys(answers).length },
       items: publicScarfQuestions(), answers, revisions,
-      disclosure: "Your named results are visible to the trainer. Presenter Mode shows protected group summaries only. This is an experimental self-reflection tool, not a validated psychological assessment.",
+      disclosure: "This is a named SCARF activity. Your display name is visible to the trainer and may appear on the Presenter screen after the trainer reveals results. This is an experimental self-reflection tool, not a validated psychological assessment.",
     });
   }
 
@@ -655,77 +705,53 @@ export async function scarfParticipantRoute(request: Request, env: ScarfEnv, url
   return fail("SCARF participant route not found.", 404);
 }
 
-type PresenterTeamSummary = { name: string; count: number; needsIndex: ScarfDomainScores; needsRank: ScarfDomainScores; classDelta: ScarfDomainScores };
-type PresenterNeedsSummary = {
-  suppressed: boolean; count: number | null; classMean: ScarfDomainScores | null;
-  teams: PresenterTeamSummary[]; teamBreakdownSuppressed: boolean; message?: string;
-};
-
-function presenterNeedsSummary(profiles: Array<{ teamName: string; needsIndex: ScarfDomainScores }>): PresenterNeedsSummary {
-  const classMean = meanScarfProfiles(profiles.map((profile) => profile.needsIndex));
-  if (!classMean || profiles.length < 5) return {
-    suppressed: true, count: null, classMean: null, teams: [], teamBreakdownSuppressed: true,
-    message: "At least five compatible, released submissions are needed before results can be shown.",
-  };
-  const groups = new Map<string, ScarfDomainScores[]>();
-  for (const profile of profiles) {
-    const group = groups.get(profile.teamName) ?? [];
-    group.push(profile.needsIndex);
-    groups.set(profile.teamName, group);
-  }
-  const teamBreakdownSuppressed = [...groups.values()].some((group) => group.length < 5);
-  const teams = teamBreakdownSuppressed ? [] : [...groups.entries()].map(([name, values]) => {
-    const needsIndex = meanScarfProfiles(values)!;
-    return {
-      name,
-      count: values.length,
-      needsIndex,
-      needsRank: descendingMidranks(needsIndex),
-      classDelta: Object.fromEntries(SCARF_DOMAIN_CODES.map((code) => [code, needsIndex[code] - classMean[code]])) as ScarfDomainScores,
-    };
-  }).sort((a, b) => a.name.localeCompare(b.name));
+async function sessionPresenterAggregate(db: D1Database, sessionId: string) {
+  const report = await getScarfAnalytics(db, "session", sessionId, null, null, null, false);
   return {
-    suppressed: false, count: profiles.length, classMean, teams, teamBreakdownSuppressed,
-    ...(teamBreakdownSuppressed ? { message: "Team comparisons are hidden because at least one group is too small to display safely." } : {}),
+    count: report.heatmap.classCount,
+    classMean: report.heatmap.classMean,
+    teams: report.heatmap.teams,
+    participants: report.heatmap.participants,
+    comparisonAvailable: report.heatmap.comparisonAvailable,
   };
 }
 
-async function presenterAggregate(db: D1Database, activityId: string): Promise<PresenterNeedsSummary> {
-  const rows = await db.prepare(`SELECT COALESCE(t.name, 'Unassigned') AS team_name, r.integrated_needs_index_json
-    FROM scarf_participations sp JOIN participants p ON p.id = sp.participant_id
+type PresenterParticipant = { id: string; displayName: string; teamName: string; status: "in_progress" | "submitted"; answeredCount: number; currentQuestion: number };
+type PresenterParticipantRow = { id: string; display_name: string; team_name: string; status: "in_progress" | "submitted"; answered_count: number; current_question: number };
+
+async function activityPresenterParticipants(db: D1Database, activityId: string): Promise<PresenterParticipant[]> {
+  const { results } = await db.prepare(`
+    SELECT p.id, p.display_name, COALESCE(t.name, 'Unassigned') AS team_name,
+      sp.status, sp.current_question,
+      (SELECT COUNT(*) FROM scarf_answers sa WHERE sa.participant_id = sp.participant_id AND sa.generation = sp.generation) AS answered_count
+    FROM participants p
+    JOIN scarf_participations sp ON sp.participant_id = p.id AND sp.activity_id = ?
     LEFT JOIN teams t ON t.id = p.team_id
-    JOIN scarf_results r ON r.participant_id = sp.participant_id AND r.generation = sp.generation
-    WHERE sp.activity_id = ? AND sp.status = 'submitted' AND r.scoring_version = ?
-      AND r.integrated_needs_index_json IS NOT NULL`)
-    .bind(activityId, SCARF_SCORING_VERSION)
-    .all<{ team_name: string; integrated_needs_index_json: string }>();
-  const profiles: Array<{ teamName: string; needsIndex: ScarfDomainScores }> = [];
-  for (const row of rows.results) {
-    try { profiles.push({ teamName: row.team_name, needsIndex: JSON.parse(row.integrated_needs_index_json) as ScarfDomainScores }); }
-    catch { /* Corrupt stored scores never enter a public aggregate. */ }
-  }
-  return presenterNeedsSummary(profiles);
+    WHERE p.activity_id = ? ORDER BY p.joined_at
+  `).bind(activityId, activityId).all<PresenterParticipantRow>();
+  return results.map((person) => ({
+    id: person.id,
+    displayName: person.display_name,
+    teamName: person.team_name,
+    status: person.status,
+    answeredCount: Number(person.answered_count ?? 0),
+    currentQuestion: Number(person.current_question ?? 1),
+  }));
 }
 
-async function sessionPresenterAggregate(db: D1Database, sessionId: string): Promise<PresenterNeedsSummary> {
-  // Named rows are used only inside this authenticated Worker call. The public
-  // response is shaped into class/team means here and never includes individuals.
-  const report = await getScarfAnalytics(db, "session", sessionId, null, null, null, true);
-  if (report.instrument.scoringVersion !== SCARF_SCORING_VERSION || !report.heatmap.available) {
-    return { suppressed: true, count: null, classMean: null, teams: [], teamBreakdownSuppressed: true,
-      message: "No compatible, released Integrated Needs Profile is available for this session yet." };
-  }
-  const count = report.heatmap.classCount;
-  const classMean = report.heatmap.classMean;
-  if (!classMean || count < 5) return { suppressed: true, count: null, classMean: null, teams: [], teamBreakdownSuppressed: true,
-    message: "At least five compatible, released submissions are needed before results can be shown." };
-  const teamRows = report.heatmap.teams as PresenterTeamSummary[];
-  const teamBreakdownSuppressed = teamRows.some((team) => team.count < 5);
+async function scarfPresenterHeatmap(db: D1Database, activityId: string, view: "individual" | "team", comparison: "personal_pattern" | "compared_to_class") {
+  const report = await getScarfAnalytics(db, "activity", activityId, null, null, null, false);
+  const activity = await activityWithConfig(db, activityId);
+  const usableTeams = report.heatmap.teams.filter((team) => team.name !== "Unassigned" && team.needsIndex && team.needsRank);
+  const actualView = view === "team" && Boolean(activity?.allow_teams) && usableTeams.length >= 2 ? "team" : "individual";
+  const actualComparison = comparison === "compared_to_class" && report.heatmap.comparisonAvailable ? "compared_to_class" : "personal_pattern";
   return {
-    suppressed: false, count, classMean,
-    teams: teamBreakdownSuppressed ? [] : teamRows,
-    teamBreakdownSuppressed,
-    ...(teamBreakdownSuppressed ? { message: "Team comparisons are hidden because at least one group is too small to display safely." } : {}),
+    view: actualView,
+    comparison: actualComparison,
+    classCount: report.heatmap.classCount,
+    comparisonAvailable: report.heatmap.comparisonAvailable,
+    participants: report.heatmap.participants,
+    teams: usableTeams,
   };
 }
 
@@ -736,32 +762,46 @@ export async function scarfPresenterRoute(request: Request, env: ScarfEnv, token
   if (!token || !/^[a-f0-9]{64}$/i.test(token)) return null;
   const session = await db.prepare(`SELECT ps.activity_id, ps.session_id, ps.expires_at, ps.revoked_at,
       COALESCE(a.title, workshop.name) AS title, COALESCE(a.state, 'session') AS state,
-      cfg.release_mode, cfg.results_released_at,
-      CASE WHEN ps.session_id IS NULL THEN present.revealed ELSE session_present.revealed END AS revealed,
-      present.selected_team_id, team.name AS team_name,
-      session_present.selected_team_name, COALESCE(present.scarf_layer, session_present.scarf_layer, 'reaction') AS scarf_layer
+      present.presenter_stage, present.presenter_view, present.presenter_comparison,
+      session_present.revealed AS session_revealed
     FROM scarf_presenter_sessions ps
     LEFT JOIN activities a ON a.id = ps.activity_id
     LEFT JOIN sessions workshop ON workshop.id = ps.session_id
-    LEFT JOIN scarf_activity_configs cfg ON cfg.activity_id = a.id
     LEFT JOIN presentation_state present ON present.activity_id = a.id
-    LEFT JOIN teams team ON team.id = present.selected_team_id
     LEFT JOIN scarf_session_presentation_state session_present ON session_present.session_id = ps.session_id
     WHERE ps.token_hash = ?`).bind(await sha256(token)).first<{
     activity_id: string | null; session_id: string | null; expires_at: string; revoked_at: string | null; title: string; state: string;
-    release_mode: string | null; results_released_at: string | null; revealed: number | null; selected_team_id: string | null;
-    team_name: string | null; selected_team_name: string | null; scarf_layer: "reaction" | "priority";
+    presenter_stage: "lobby" | "closed_waiting" | "heatmap_revealed" | null; presenter_view: "individual" | "team" | null;
+    presenter_comparison: "personal_pattern" | "compared_to_class" | null; session_revealed: number | null;
   }>();
   if (!session) return null;
   if (session.revoked_at || Date.parse(session.expires_at) <= Date.now()) return fail("Presenter link has expired. Ask your trainer to open a new screen.", 404);
-  const released = session.session_id !== null || session.release_mode === "immediate" || Boolean(session.results_released_at);
-  if (!session.revealed || !released) return json({ kind: "scarf-aggregate", revealed: false, title: session.title, state: session.state });
-  const aggregate = session.session_id
-    ? await sessionPresenterAggregate(db, session.session_id)
-    : await presenterAggregate(db, session.activity_id!);
-  const presentation = { layer: "integrated-needs", comparisonBasis: "Personal Pattern or Compared to Class", teamName: "All teams" };
-  return json({ kind: "scarf-aggregate", revealed: true, activity: { title: session.title, state: session.state }, presentation,
-    heatmap: aggregate,
-    dimensions: DIMENSION_LABELS,
-    disclosure: `${session.session_id ? "Integrated Needs Profiles for compatible, released activities in this session" : "Integrated Needs Profile for this activity"}. Exploratory relative preference indices; not validated, norm-referenced, or a measure of competence. Individual names and scores are never shown.` });
+
+  if (!session.activity_id) {
+    const stage = session.session_revealed ? "heatmap_revealed" : "lobby";
+    const aggregate = stage === "heatmap_revealed" ? await sessionPresenterAggregate(db, session.session_id!) : null;
+    return json({ kind: "scarf-control", stage, activity: { title: session.title, state: session.state },
+      view: "individual", comparison: "personal_pattern", counts: { joined: aggregate?.participants.length ?? 0, submitted: aggregate?.count ?? 0, inProgress: 0 },
+      heatmap: aggregate ? { participants: aggregate.participants, teams: aggregate.teams, classCount: aggregate.count, comparisonAvailable: aggregate.comparisonAvailable } : null,
+      disclosure: "Named SCARF results are shown only after the trainer explicitly reveals the Presenter heatmap." });
+  }
+
+  const activity = await activityWithConfig(db, session.activity_id);
+  if (!activity) return fail("SCARF activity not found.", 404);
+  const storedStage = session.presenter_stage ?? "lobby";
+  const stage = activity.state !== "closed" ? "lobby" : storedStage === "heatmap_revealed" ? "heatmap_revealed" : "closed_waiting";
+  const participants = await activityPresenterParticipants(db, activity.id);
+  const submitted = participants.filter((person) => person.status === "submitted").length;
+  const counts = { joined: participants.length, submitted, inProgress: participants.length - submitted };
+  const base = { kind: "scarf-control" as const, stage, activity: { title: activity.title, state: activity.state, sessionName: activity.session_name },
+    counts, syncAt: activity.presentation_updated_at, dimensions: DIMENSION_LABELS,
+    disclosure: "SCARF is always named. Presenter rows are visible only after the trainer explicitly reveals the heatmap. These exploratory indices are not validated or norm-referenced." };
+  if (stage === "lobby") {
+    return json({ ...base, join: { path: `/activity/${activity.access_slug}`, pin: activity.join_pin }, participants, message: "Responses update live while the activity is open." });
+  }
+  if (stage === "closed_waiting") {
+    return json({ ...base, message: "Your trainer will share the results shortly." });
+  }
+  const heatmap = await scarfPresenterHeatmap(db, activity.id, activity.presenter_view, activity.presenter_comparison);
+  return json({ ...base, view: heatmap.view, comparison: heatmap.comparison, heatmap });
 }

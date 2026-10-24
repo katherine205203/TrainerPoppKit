@@ -19,6 +19,7 @@ const PollInput = z.object({
   maxSelections: z.number().int().min(1).max(10), allowOther: z.boolean(),
   identityMode: z.enum(["anonymous", "named"]),
   participantResultsMode: z.enum(["presenter_only", "presenter_and_participant"]),
+  presentationMode: z.enum(["live_results", "close_reveal"]).default("close_reveal"),
   sessionId: z.string().uuid().nullable().optional(),
 });
 const PollVoteInput = z.object({
@@ -78,6 +79,7 @@ type PollRow = {
   activity_id: string; session_id: string | null; title: string; question: string; question_type: "single" | "multiple";
   max_selections: number; allow_other: number; identity_mode: "anonymous" | "named";
   participant_results_mode: "presenter_only" | "presenter_and_participant"; reveal_state: "hidden" | "revealed";
+  presentation_mode: "live_results" | "close_reveal";
   access_slug: string; version: number; reopen_count: number; reopened_at: string | null; state: string;
   join_pin: string | null; session_name: string | null; session_status?: string | null; require_name?: number;
 };
@@ -85,18 +87,18 @@ type PollRow = {
 async function getPoll(db: D1Database, activityId: string): Promise<PollRow | null> {
   return db.prepare(`SELECT a.id AS activity_id, a.session_id, a.title, a.state, a.join_pin, a.require_name,
       s.name AS session_name, s.status AS session_status, p.question, p.question_type, p.max_selections,
-      p.allow_other, p.identity_mode, p.participant_results_mode, p.reveal_state, p.access_slug,
+      p.allow_other, p.identity_mode, p.participant_results_mode, p.reveal_state, p.presentation_mode, p.access_slug,
       p.version, p.reopen_count, p.reopened_at
     FROM activities a JOIN poll_configs p ON p.activity_id = a.id LEFT JOIN sessions s ON s.id = a.session_id
-    WHERE a.id = ? AND a.tool_id = 'poll'`).bind(activityId).first<PollRow>();
+    WHERE a.id = ? AND a.tool_id = 'poll' AND a.deleted_at IS NULL`).bind(activityId).first<PollRow>();
 }
 async function getPollBySlug(db: D1Database, slug: string): Promise<PollRow | null> {
   return db.prepare(`SELECT a.id AS activity_id, a.session_id, a.title, a.state, a.join_pin, a.require_name,
       s.name AS session_name, s.status AS session_status, p.question, p.question_type, p.max_selections,
-      p.allow_other, p.identity_mode, p.participant_results_mode, p.reveal_state, p.access_slug,
+      p.allow_other, p.identity_mode, p.participant_results_mode, p.reveal_state, p.presentation_mode, p.access_slug,
       p.version, p.reopen_count, p.reopened_at
     FROM poll_configs p JOIN activities a ON a.id = p.activity_id LEFT JOIN sessions s ON s.id = a.session_id
-    WHERE p.access_slug = ?`).bind(slug).first<PollRow>();
+    WHERE p.access_slug = ? AND a.deleted_at IS NULL`).bind(slug).first<PollRow>();
 }
 async function pollOptions(db: D1Database, activityId: string): Promise<PollOption[]> {
   const rows = await db.prepare("SELECT id, label, sort_order, is_other FROM poll_options WHERE activity_id = ? ORDER BY sort_order")
@@ -106,7 +108,8 @@ async function pollOptions(db: D1Database, activityId: string): Promise<PollOpti
 function toInput(poll: PollRow, options: PollOption[]): PollConfigInput {
   return { title: poll.title, question: poll.question, questionType: poll.question_type,
     options: options.filter((option) => !option.isOther).map((option) => option.label), maxSelections: Number(poll.max_selections),
-    allowOther: Boolean(poll.allow_other), identityMode: poll.identity_mode, participantResultsMode: poll.participant_results_mode };
+    allowOther: Boolean(poll.allow_other), identityMode: poll.identity_mode, participantResultsMode: poll.participant_results_mode,
+    presentationMode: poll.presentation_mode };
 }
 async function getAggregate(db: D1Database, activityId: string) {
   const options = await pollOptions(db, activityId);
@@ -146,9 +149,67 @@ async function audit(db: D1Database, activityId: string, action: string, previou
     VALUES (?, ?, ?, ?, ?, ?)`).bind(newId(), activityId, action, previous, next, version).run();
 }
 
+type PollPresenterContext = {
+  context_key: string;
+  session_id: string | null;
+  activity_id: string | null;
+  spotlight_activity_id: string | null;
+  display_state: "JOIN_LOBBY" | "VOTING_HIDDEN" | "LIVE_RESULTS" | "ACTIVITY_CLOSED" | "FINAL_RESULTS" | "FROZEN_RESULTS" | "EMPTY_RESULTS" | "RECONNECTING";
+  frozen_snapshot_json: string | null;
+  revision: number;
+  updated_at: string;
+};
+
+function presenterContextKey(poll: PollRow): string {
+  return poll.session_id ? `session:${poll.session_id}` : `activity:${poll.activity_id}`;
+}
+
+async function ensurePollPresenterContext(db: D1Database, poll: PollRow): Promise<PollPresenterContext> {
+  const key = presenterContextKey(poll);
+  let context = await db.prepare("SELECT * FROM poll_presenter_contexts WHERE context_key = ?")
+    .bind(key).first<PollPresenterContext>();
+  if (!context) {
+    await db.prepare(`INSERT INTO poll_presenter_contexts
+      (context_key, session_id, activity_id, spotlight_activity_id, display_state)
+      VALUES (?, ?, ?, ?, 'JOIN_LOBBY')`)
+      .bind(key, poll.session_id, poll.session_id ? null : poll.activity_id, poll.activity_id).run();
+    context = await db.prepare("SELECT * FROM poll_presenter_contexts WHERE context_key = ?")
+      .bind(key).first<PollPresenterContext>();
+  }
+  if (!context) throw new Error("Presenter context could not be initialized.");
+  return context;
+}
+
+async function updatePresenterContext(db: D1Database, poll: PollRow, values: {
+  displayState?: PollPresenterContext["display_state"];
+  spotlightActivityId?: string | null;
+  frozenSnapshot?: string | null;
+}) {
+  const context = await ensurePollPresenterContext(db, poll);
+  const nextState = values.displayState ?? context.display_state;
+  const nextSpotlight = values.spotlightActivityId === undefined ? context.spotlight_activity_id : values.spotlightActivityId;
+  const nextSnapshot = values.frozenSnapshot === undefined ? context.frozen_snapshot_json : values.frozenSnapshot;
+  await db.prepare(`UPDATE poll_presenter_contexts SET display_state = ?, spotlight_activity_id = ?,
+    frozen_snapshot_json = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE context_key = ?`)
+    .bind(nextState, nextSpotlight, nextSnapshot, context.context_key).run();
+}
+
+function derivedPresenterState(poll: PollRow, respondentCount: number, context: PollPresenterContext): PollPresenterContext["display_state"] {
+  if (context.frozen_snapshot_json) return "FROZEN_RESULTS";
+  if (poll.presentation_mode === "live_results") {
+    if (poll.state === "open") return respondentCount > 0 ? "LIVE_RESULTS" : "JOIN_LOBBY";
+    if (poll.state === "closed") return respondentCount > 0 ? "LIVE_RESULTS" : "EMPTY_RESULTS";
+  }
+  if (poll.state === "open") return "VOTING_HIDDEN";
+  if (poll.state === "closed" && poll.reveal_state === "revealed") return respondentCount > 0 ? "FINAL_RESULTS" : "EMPTY_RESULTS";
+  if (poll.state === "closed") return "ACTIVITY_CLOSED";
+  return "JOIN_LOBBY";
+}
+
 async function trainerPollPayload(db: D1Database, poll: PollRow) {
   const options = await pollOptions(db, poll.activity_id);
   const aggregate = await getAggregate(db, poll.activity_id);
+  const presenterContext = await ensurePollPresenterContext(db, poll);
   const counts = await db.prepare(`SELECT COUNT(*) AS joined,
       SUM(CASE WHEN pp.has_submitted = 1 THEN 1 ELSE 0 END) AS submitted
     FROM participants p LEFT JOIN poll_participations pp ON pp.participant_id = p.id AND pp.activity_id = p.activity_id
@@ -189,16 +250,26 @@ async function trainerPollPayload(db: D1Database, poll: PollRow) {
       selections: labels.get(row.id) ?? [], otherText: row.other_text, submittedAt: row.submitted_at, updatedAt: row.updated_at }));
   }
   const eligible = poll.session_id ? Number((await db.prepare("SELECT expected_participants FROM sessions WHERE id = ?").bind(poll.session_id).first<{ expected_participants: number }>())?.expected_participants ?? 0) : 0;
+  const sessionPolls = poll.session_id ? await db.prepare(`SELECT a.id AS activity_id, a.title, a.state, pc.presentation_mode
+    FROM activities a JOIN poll_configs pc ON pc.activity_id = a.id
+    WHERE a.session_id = ? AND a.tool_id = 'poll' AND a.deleted_at IS NULL ORDER BY a.created_at`).bind(poll.session_id)
+    .all<{ activity_id: string; title: string; state: string; presentation_mode: string }>() : { results: [] as Array<{ activity_id: string; title: string; state: string; presentation_mode: string }> };
   return {
     poll: { activityId: poll.activity_id, sessionId: poll.session_id, sessionName: poll.session_name, sessionStatus: poll.session_status,
       title: poll.title, question: poll.question, questionType: poll.question_type, maxSelections: Number(poll.max_selections),
       allowOther: Boolean(poll.allow_other), identityMode: poll.identity_mode, participantResultsMode: poll.participant_results_mode,
+      presentationMode: poll.presentation_mode,
       revealState: poll.reveal_state, state: poll.state, accessSlug: poll.access_slug, joinPin: poll.join_pin,
       version: Number(poll.version), reopenCount: Number(poll.reopen_count), reopenedAt: poll.reopened_at,
       archivedSession: poll.session_status === "completed" },
     options, counts: { joined: Number(counts?.joined ?? 0), submitted: Number(counts?.submitted ?? 0), respondents: aggregate.respondentCount,
-      eligible, completionRate: eligible > 0 ? Math.round(Number(counts?.submitted ?? 0) / eligible * 100) : null },
+      eligible, completionRate: eligible > 0 ? Math.min(100, Math.round(Number(counts?.submitted ?? 0) / eligible * 100)) : null },
     results: aggregate.results, participants, otherResponses, namedResponses,
+    presenter: { contextKey: presenterContext.context_key, sessionId: presenterContext.session_id,
+      spotlightActivityId: presenterContext.spotlight_activity_id, displayState: derivedPresenterState(poll, aggregate.respondentCount, presenterContext),
+      frozen: Boolean(presenterContext.frozen_snapshot_json), revision: Number(presenterContext.revision),
+      updatedAt: presenterContext.updated_at },
+    sessionPolls: sessionPolls.results.map((item) => ({ activityId: item.activity_id, title: item.title, state: item.state, presentationMode: item.presentation_mode })),
   };
 }
 
@@ -216,9 +287,9 @@ async function createPoll(db: D1Database, data: z.infer<typeof PollInput>, slug 
     VALUES (?, ?, ?, 'poll', 'draft', 'trainer_reveal', ?, ?, 'poll-v1', 'poll-v1')`)
     .bind(activityId, sessionId, data.title.trim(), sessionId || data.identityMode === "named" ? 1 : 0, names.length ? 1 : 0),
   db.prepare(`INSERT INTO poll_configs (activity_id, question, question_type, max_selections, allow_other,
-    identity_mode, participant_results_mode, access_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    identity_mode, participant_results_mode, presentation_mode, access_slug) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .bind(activityId, data.question.trim(), data.questionType, data.maxSelections, data.allowOther ? 1 : 0,
-      data.identityMode, data.participantResultsMode, accessSlug),
+      data.identityMode, data.participantResultsMode, data.presentationMode, accessSlug),
   db.prepare("INSERT INTO presentation_state (activity_id) VALUES (?)").bind(activityId)];
   let order = 0;
   for (const label of data.options) {
@@ -234,15 +305,62 @@ async function createPoll(db: D1Database, data: z.infer<typeof PollInput>, slug 
 }
 
 async function pollOwnerRoute(request: Request, env: PollEnv, url: URL): Promise<Response | null> {
-  if (!url.pathname.startsWith("/api/owner/polls") && !url.pathname.startsWith("/api/owner/poll-sessions/")) return null;
+  const presenterTokenActivityMatch = url.pathname.match(/^\/api\/owner\/activities\/([0-9a-f-]+)\/presenter-token$/i);
+  const presenterTokenPollMatch = url.pathname.match(/^\/api\/owner\/polls\/([0-9a-f-]+)\/presenter-token$/i);
+  const presenterContextMatch = url.pathname.match(/^\/api\/owner\/polls\/([0-9a-f-]+)\/presenter$/i);
+  if (!url.pathname.startsWith("/api/owner/polls") && !url.pathname.startsWith("/api/owner/poll-sessions/") && !presenterTokenActivityMatch) return null;
   const db = dbFor(env);
   if (!db) return fail("D1 database is not configured.", 503);
+  if (request.method === "POST" && (presenterTokenActivityMatch || presenterTokenPollMatch)) {
+    const activityId = (presenterTokenActivityMatch ?? presenterTokenPollMatch)![1]!;
+    const poll = await getPoll(db, activityId);
+    if (!poll) return null;
+    const rawToken = randomToken(32);
+    const tokenHash = await sha256(rawToken);
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    await ensurePollPresenterContext(db, poll);
+    await db.prepare(`INSERT INTO poll_presenter_sessions (token_hash, session_id, activity_id, expires_at)
+      VALUES (?, ?, ?, ?)`)
+      .bind(tokenHash, poll.session_id, poll.session_id ? null : poll.activity_id, expiresAt).run();
+    return json({ path: `/presenter#${rawToken}`, expiresAt, title: poll.title });
+  }
+  if (request.method === "POST" && presenterContextMatch) {
+    const poll = await getPoll(db, presenterContextMatch[1]!);
+    if (!poll) return fail("Poll not found.", 404);
+    const data = await readBody(request, z.object({ action: z.enum(["freeze", "resume", "spotlight"]), activityId: z.string().uuid().optional() }));
+    if (!data) return fail("Choose a valid Presenter action.");
+    if (data.action === "spotlight" && !poll.session_id) return fail("Spotlight is available for Session Polls only.", 409, "SESSION_REQUIRED");
+    const context = await ensurePollPresenterContext(db, poll);
+    if (data.action === "spotlight") {
+      if (!data.activityId) return fail("Choose a Poll to spotlight.");
+      const selected = await getPoll(db, data.activityId);
+      if (!selected || selected.session_id !== poll.session_id) return fail("That Poll is not part of this Session.", 403, "INVALID_SPOTLIGHT");
+      const aggregate = await getAggregate(db, selected.activity_id);
+      await updatePresenterContext(db, poll, { spotlightActivityId: selected.activity_id, frozenSnapshot: null, displayState: derivedPresenterState(selected, aggregate.respondentCount, { ...context, frozen_snapshot_json: null }) });
+      await audit(db, poll.activity_id, "spotlight-changed", context.spotlight_activity_id, selected.activity_id, Number(poll.version));
+      return json({ spotlightActivityId: selected.activity_id, displayState: derivedPresenterState(selected, aggregate.respondentCount, { ...context, frozen_snapshot_json: null }) });
+    }
+    const currentSpotlight = poll.session_id && context.spotlight_activity_id ? await getPoll(db, context.spotlight_activity_id) : null;
+    const spotlightPoll = currentSpotlight ?? poll;
+    const aggregate = await getAggregate(db, spotlightPoll.activity_id);
+    if (data.action === "freeze") {
+      const snapshot = JSON.stringify({ respondentCount: aggregate.respondentCount, results: aggregate.results });
+      await updatePresenterContext(db, poll, { frozenSnapshot: snapshot, displayState: "FROZEN_RESULTS" });
+      await audit(db, poll.activity_id, "presenter-frozen", context.display_state, "FROZEN_RESULTS", Number(poll.version));
+      return json({ frozen: true, displayState: "FROZEN_RESULTS" });
+    }
+    const displayState = derivedPresenterState(spotlightPoll, aggregate.respondentCount, { ...context, frozen_snapshot_json: null });
+    await updatePresenterContext(db, poll, { frozenSnapshot: null, displayState });
+    await audit(db, poll.activity_id, "presenter-resumed", context.display_state, displayState, Number(poll.version));
+    return json({ frozen: false, displayState });
+  }
   if (request.method === "GET" && url.pathname === "/api/owner/polls") {
     const rows = await db.prepare(`SELECT a.id AS activity_id, a.session_id, a.title, a.state, a.join_pin, s.name AS session_name,
       p.question, p.question_type, p.identity_mode, p.reveal_state, p.access_slug, p.participant_results_mode,
       (SELECT COUNT(*) FROM poll_responses pr WHERE pr.activity_id = a.id) AS respondent_count,
       (SELECT COUNT(*) FROM poll_participations pp WHERE pp.activity_id = a.id AND pp.has_submitted = 1) AS completed_count
       FROM activities a JOIN poll_configs p ON p.activity_id = a.id LEFT JOIN sessions s ON s.id = a.session_id
+      WHERE a.deleted_at IS NULL
       ORDER BY a.updated_at DESC`).all();
     return json({ polls: rows.results });
   }
@@ -279,8 +397,8 @@ async function pollOwnerRoute(request: Request, env: PollEnv, url: URL): Promise
     if (errors.length) return json({ error: errors[0], errors }, 400);
     const statements: D1PreparedStatement[] = [db.prepare(`UPDATE activities SET title = ?, require_name = ?, allow_teams = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'draft'`)
       .bind(data.title.trim(), poll.session_id || data.identityMode === "named" ? 1 : 0, poll.session_id ? 1 : 0, activityId),
-    db.prepare(`UPDATE poll_configs SET question = ?, question_type = ?, max_selections = ?, allow_other = ?, identity_mode = ?, participant_results_mode = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE activity_id = ? AND EXISTS (SELECT 1 FROM activities WHERE id = ? AND state = 'draft')`)
-      .bind(data.question.trim(), data.questionType, data.maxSelections, data.allowOther ? 1 : 0, data.identityMode, data.participantResultsMode, activityId, activityId),
+    db.prepare(`UPDATE poll_configs SET question = ?, question_type = ?, max_selections = ?, allow_other = ?, identity_mode = ?, participant_results_mode = ?, presentation_mode = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE activity_id = ? AND EXISTS (SELECT 1 FROM activities WHERE id = ? AND state = 'draft')`)
+      .bind(data.question.trim(), data.questionType, data.maxSelections, data.allowOther ? 1 : 0, data.identityMode, data.participantResultsMode, data.presentationMode, activityId, activityId),
     db.prepare("DELETE FROM poll_options WHERE activity_id = ?").bind(activityId)];
     let order = 0;
     for (const label of data.options) statements.push(db.prepare("INSERT INTO poll_options (id, activity_id, label, sort_order, is_other) VALUES (?, ?, ?, ?, 0)").bind(newId(), activityId, label.trim(), order++));
@@ -303,31 +421,45 @@ async function pollOwnerRoute(request: Request, env: PollEnv, url: URL): Promise
     if (!pin) return fail("Could not create a unique Poll code. Try again.", 503);
     await db.prepare("UPDATE activities SET state = 'open', join_pin = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'draft'")
       .bind(pin, activityId).run();
+    await updatePresenterContext(db, poll, { displayState: "JOIN_LOBBY", frozenSnapshot: null });
     await audit(db, activityId, "opened", "draft", "open", Number(poll.version));
     return json({ state: "open", pin, path: publicPath(poll.access_slug) });
   }
   if (request.method === "POST" && ["close", "reopen"].includes(action ?? "")) {
     const target = action === "close" ? "closed" : "open";
-    const allowed = action === "close" ? poll.state === "open" : poll.state === "closed" || poll.state === "archived";
-    if (!allowed) return fail(action === "close" ? "This Poll is not Live." : "Only a Closed Poll can be reopened.", 409, "INVALID_STATE");
+    const allowed = action === "close" ? poll.state === "open" : poll.state === "closed";
+    if (!allowed) {
+      if (action === "reopen" && poll.state === "archived") return fail("Reactivate the archived Activity before reopening this Poll.", 409, "ACTIVITY_ARCHIVED_REQUIRES_REACTIVATE");
+      return fail(action === "close" ? "This Poll is not Live." : "Only a Closed Poll can be reopened.", 409, "INVALID_STATE");
+    }
     const now = new Date().toISOString();
     const result = action === "close"
       ? await db.prepare("UPDATE activities SET state = 'closed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'open'").bind(activityId).run()
-      : await db.prepare(`UPDATE activities SET state = 'open', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND state IN ('closed', 'archived')`).bind(activityId).run();
+      : await db.prepare(`UPDATE activities SET state = 'open', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND state = 'closed'`).bind(activityId).run();
     if (Number(result.meta.changes ?? 0) !== 1) return fail("Poll state changed. Refresh and try again.", 409, "STALE_STATE");
-    if (action === "reopen") await db.prepare("UPDATE poll_configs SET reopened_at = ?, reopen_count = reopen_count + 1, updated_at = CURRENT_TIMESTAMP WHERE activity_id = ?").bind(now, activityId).run();
+    if (action === "reopen") await db.prepare("UPDATE poll_configs SET reveal_state = 'hidden', reopened_at = ?, reopen_count = reopen_count + 1, updated_at = CURRENT_TIMESTAMP WHERE activity_id = ?").bind(now, activityId).run();
     const nextPoll = await getPoll(db, activityId);
+    if (nextPoll) {
+      const aggregate = await getAggregate(db, activityId);
+      await updatePresenterContext(db, nextPoll, { frozenSnapshot: null, displayState: action === "reopen" ? "VOTING_HIDDEN" : derivedPresenterState(nextPoll, aggregate.respondentCount, { ...(await ensurePollPresenterContext(db, nextPoll)), frozen_snapshot_json: null }) });
+    }
     await audit(db, activityId, action === "close" ? "closed" : "reopened", poll.state, target, Number(nextPoll?.version ?? poll.version));
     return json({ state: target, archivedSession: poll.session_status === "completed" });
   }
   if (request.method === "POST" && action === "reveal") {
     const data = await readBody(request, z.object({ revealed: z.boolean(), participantResultsMode: z.enum(["presenter_only", "presenter_and_participant"]).optional() }));
     if (!data) return fail("Choose whether to reveal Poll results.");
+    if (data.revealed && poll.presentation_mode === "close_reveal" && poll.state !== "closed") return fail("Close this Poll before revealing its results.", 409, "MUST_CLOSE_BEFORE_REVEAL");
     const revealState = data.revealed ? "revealed" : "hidden";
     const mode = data.participantResultsMode ?? poll.participant_results_mode;
     await db.prepare(`UPDATE poll_configs SET reveal_state = ?, participant_results_mode = ?, version = version + 1,
       updated_at = CURRENT_TIMESTAMP WHERE activity_id = ?`)
       .bind(revealState, mode, activityId).run();
+    const updatedPoll = await getPoll(db, activityId);
+    if (updatedPoll) {
+      const aggregate = await getAggregate(db, activityId);
+      await updatePresenterContext(db, updatedPoll, { frozenSnapshot: null, displayState: derivedPresenterState(updatedPoll, aggregate.respondentCount, { ...(await ensurePollPresenterContext(db, updatedPoll)), frozen_snapshot_json: null }) });
+    }
     await audit(db, activityId, "presentation-settings", `${poll.reveal_state}:${poll.participant_results_mode}`, `${revealState}:${mode}`, Number(poll.version) + 1);
     return json({ revealState, participantResultsMode: mode });
   }
@@ -337,7 +469,7 @@ async function pollOwnerRoute(request: Request, env: PollEnv, url: URL): Promise
       title: `${poll.title} copy`, question: poll.question, questionType: poll.question_type,
       options: options.filter((option) => !option.isOther).map((option) => option.label), maxSelections: Number(poll.max_selections),
       allowOther: Boolean(poll.allow_other), identityMode: poll.identity_mode,
-      participantResultsMode: poll.participant_results_mode, sessionId: poll.session_id,
+      participantResultsMode: poll.participant_results_mode, presentationMode: poll.presentation_mode, sessionId: poll.session_id,
     };
     const created = await createPoll(db, duplicateInput);
     if (!created || "errors" in created) return fail("Could not duplicate this Poll.", 400);
@@ -385,6 +517,7 @@ async function publicPollPayload(db: D1Database, poll: PollRow) {
   return { poll: { activityId: poll.activity_id, sessionId: poll.session_id, sessionName: poll.session_name,
     title: poll.title, question: poll.question, questionType: poll.question_type, maxSelections: Number(poll.max_selections),
     allowOther: Boolean(poll.allow_other), identityMode: poll.identity_mode, participantResultsMode: poll.participant_results_mode,
+    presentationMode: poll.presentation_mode, revealState: poll.reveal_state,
     state: poll.state, accessSlug: poll.access_slug, sessionAccessSlug: sessionAccess?.access_slug ?? null }, options: options.map(({ id, label, isOther }) => ({ id, label, isOther })),
     teams: poll.session_id ? await db.prepare("SELECT id, name FROM teams WHERE activity_id = ? ORDER BY created_at")
       .bind(poll.activity_id).all<{ id: string; name: string }>().then((result) => result.results) : [] };
@@ -392,8 +525,9 @@ async function publicPollPayload(db: D1Database, poll: PollRow) {
 async function identityProfile(db: D1Database, sessionId: string, token: string) {
   if (!/^[a-f\d]{64}$/i.test(token)) return null;
   const hash = await sha256(token);
-  const identity = await db.prepare(`SELECT id, display_name, role, team_name FROM session_participant_identities
-    WHERE session_id = ? AND token_hash = ?`).bind(sessionId, hash).first<{ id: string; display_name: string | null; role: string; team_name: string | null }>();
+  const identity = await db.prepare(`SELECT i.id, i.display_name, i.role, i.team_name FROM session_participant_identities i
+    JOIN sessions s ON s.id=i.session_id WHERE i.session_id = ? AND i.token_hash = ? AND s.status!='completed' AND s.deleted_at IS NULL`)
+    .bind(sessionId, hash).first<{ id: string; display_name: string | null; role: string; team_name: string | null }>();
   if (!identity) return null;
   if (identity.display_name) return { ...identity, display_name: identity.display_name };
   const previous = await db.prepare(`SELECT p.display_name, p.role, t.name AS team_name FROM participants p
@@ -406,12 +540,12 @@ async function pollSessionPayload(db: D1Database, accessSlug: string, sessionTok
   const session = await db.prepare(`SELECT s.id, s.name, s.status, a.access_slug, a.join_pin FROM poll_session_access a
     JOIN sessions s ON s.id = a.session_id WHERE a.access_slug = ?`).bind(accessSlug)
     .first<{ id: string; name: string; status: string; access_slug: string; join_pin: string }>();
-  if (!session) return null;
+  if (!session || session.status === "completed") return null;
   const rows = await db.prepare(`SELECT a.id AS activity_id, a.title, a.state, pc.question, pc.access_slug,
       pc.identity_mode, pc.participant_results_mode,
       (SELECT COUNT(*) FROM poll_responses pr WHERE pr.activity_id = a.id) AS respondent_count
     FROM activities a JOIN poll_configs pc ON pc.activity_id = a.id
-    WHERE a.session_id = ? AND a.state = 'open' ORDER BY a.created_at`)
+    WHERE a.session_id = ? AND a.state = 'open' AND a.deleted_at IS NULL ORDER BY a.created_at`)
     .bind(session.id).all<{ activity_id: string; title: string; state: string; question: string; access_slug: string; identity_mode: string; participant_results_mode: string; respondent_count: number }>();
   let profile = null as Awaited<ReturnType<typeof identityProfile>>;
   let identityId: string | null = null;
@@ -457,7 +591,7 @@ async function pollJoinRoute(request: Request, env: PollEnv, url: URL): Promise<
       let name = data.displayName.trim();
       let role = data.role.trim();
       let teamName = data.teamName?.trim() || "";
-      if (poll.session_id) {
+      if (poll.session_id && poll.session_status !== "completed") {
         if (data.sessionToken) {
           const profile = await identityProfile(db, poll.session_id, data.sessionToken);
           if (profile) {
@@ -505,7 +639,7 @@ async function pollJoinRoute(request: Request, env: PollEnv, url: URL): Promise<
       if (sessionIdentityId) await db.prepare(`UPDATE session_participant_identities SET display_name = ?, role = ?, team_name = ? WHERE id = ?`)
         .bind(name, role, teamName || (teams.results.find((team) => team.id === teamId)?.name ?? null), sessionIdentityId).run();
       return json({ token, activityId: poll.activity_id, participant: { id: participantId },
-        ...(poll.session_id ? { sessionToken: (data as typeof data & { returnedSessionToken?: string }).returnedSessionToken ?? data.sessionToken } : {}) }, existing ? 200 : 201);
+        ...(poll.session_id && poll.session_status !== "completed" ? { sessionToken: (data as typeof data & { returnedSessionToken?: string }).returnedSessionToken ?? data.sessionToken } : {}) }, existing ? 200 : 201);
     }
     return fail("Poll join route not found.", 404);
   }
@@ -520,7 +654,7 @@ async function pollJoinRoute(request: Request, env: PollEnv, url: URL): Promise<
   if (request.method === "POST" && action === "profile") {
     const data = await readBody(request, z.object({ sessionToken: z.string().regex(/^[a-f\d]{64}$/i) }));
     if (!data) return fail("Session participant identity is invalid.", 400);
-    const access = await db.prepare("SELECT session_id FROM poll_session_access WHERE access_slug = ?").bind(accessSlug).first<{ session_id: string }>();
+  const access = await db.prepare("SELECT p.session_id FROM poll_session_access p JOIN sessions s ON s.id=p.session_id WHERE p.access_slug = ? AND s.status!='completed' AND s.deleted_at IS NULL").bind(accessSlug).first<{ session_id: string }>();
     if (!access) return fail("Session link not found.", 404);
     const result = await pollSessionPayload(db, accessSlug, data.sessionToken);
     if (!result?.profile) return fail("Saved Session identity was not found. Join with your name once more.", 404, "IDENTITY_NOT_FOUND");
@@ -530,9 +664,9 @@ async function pollJoinRoute(request: Request, env: PollEnv, url: URL): Promise<
     if (!await rateLimit(request, env, "poll-identity")) return fail("Too many Session join attempts. Wait a few minutes and try again.", 429);
     const data = await readBody(request, z.object({ displayName: z.string().trim().min(1).max(60), role: z.string().trim().max(60).optional().default(""), teamName: z.string().trim().max(50).optional().nullable() }));
     if (!data) return fail("Enter your name to join this Session.", 400);
-    const session = await db.prepare("SELECT session_id FROM poll_session_access WHERE access_slug = ?").bind(accessSlug).first<{ session_id: string }>();
+    const session = await db.prepare("SELECT p.session_id FROM poll_session_access p JOIN sessions s ON s.id=p.session_id WHERE p.access_slug = ? AND s.status!='completed' AND s.deleted_at IS NULL").bind(accessSlug).first<{ session_id: string }>();
     if (!session) return fail("Session link not found.", 404);
-    const active = await db.prepare("SELECT 1 FROM activities WHERE session_id = ? AND tool_id = 'poll' AND state = 'open' LIMIT 1").bind(session.session_id).first();
+    const active = await db.prepare("SELECT 1 FROM activities WHERE session_id = ? AND tool_id = 'poll' AND state = 'open' AND deleted_at IS NULL LIMIT 1").bind(session.session_id).first();
     if (!active) return fail("This Session has no Live Polls right now.", 409);
     if (data.teamName) {
       const valid = (await sessionPollNames(db, session.session_id)).includes(data.teamName);
@@ -648,15 +782,67 @@ async function pollPresenterRoute(request: Request, env: PollEnv, token: string 
   const db = dbFor(env);
   if (!db || !token || !/^[a-f\d]{48,64}$/i.test(token)) return null;
   const hash = await sha256(token);
-  const poll = await db.prepare(`SELECT a.id AS activity_id, a.title, a.state, p.question, p.reveal_state, p.participant_results_mode
-    FROM activities a JOIN poll_configs p ON p.activity_id = a.id WHERE a.presenter_token_hash = ?`).bind(hash)
-    .first<{ activity_id: string; title: string; state: string; question: string; reveal_state: string; participant_results_mode: string }>();
-  if (!poll) return null;
-  if (poll.reveal_state !== "revealed") return json({ kind: "poll", revealed: false, title: poll.title, question: poll.question, state: poll.state });
-  const aggregate = await getAggregate(db, poll.activity_id);
-  return json({ kind: "poll", revealed: true, title: poll.title, question: poll.question, state: poll.state,
-    respondentCount: aggregate.respondentCount, results: aggregate.results, questionType: (await getPoll(db, poll.activity_id))?.question_type,
-    multiSelectNote: (await getPoll(db, poll.activity_id))?.question_type === "multiple" ? "Percentages may total more than 100%." : null });
+  const presenterSession = await db.prepare(`SELECT token_hash, session_id, activity_id FROM poll_presenter_sessions
+    WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > CURRENT_TIMESTAMP`).bind(hash)
+    .first<{ token_hash: string; session_id: string | null; activity_id: string | null }>();
+  if (!presenterSession) {
+    // Keep already-issued v1.2 links working while new links use a scoped presenter session.
+    const legacy = await db.prepare(`SELECT a.id AS activity_id FROM activities a
+      JOIN poll_configs p ON p.activity_id = a.id WHERE a.presenter_token_hash = ? AND a.deleted_at IS NULL`).bind(hash)
+      .first<{ activity_id: string }>();
+    if (!legacy) return null;
+    const poll = await getPoll(db, legacy.activity_id);
+    if (!poll) return null;
+    if (poll.reveal_state !== "revealed") return json({ kind: "poll", revealed: false, title: poll.title, question: poll.question, state: poll.state });
+    const aggregate = await getAggregate(db, poll.activity_id);
+    return json({ kind: "poll", revealed: true, title: poll.title, question: poll.question, state: poll.state,
+      respondentCount: aggregate.respondentCount, results: aggregate.results, questionType: poll.question_type,
+      multiSelectNote: poll.question_type === "multiple" ? "Percentages may total more than 100%." : null });
+  }
+  const basePoll = presenterSession.activity_id
+    ? await getPoll(db, presenterSession.activity_id)
+    : await db.prepare("SELECT id AS activity_id FROM activities WHERE session_id = ? AND tool_id = 'poll' AND deleted_at IS NULL ORDER BY created_at LIMIT 1")
+      .bind(presenterSession.session_id).first<{ activity_id: string }>().then((row) => row ? getPoll(db, row.activity_id) : null);
+  if (!basePoll) return json({ kind: "poll", displayState: "RECONNECTING", error: "Presenter activity is unavailable." }, 404);
+  const context = await ensurePollPresenterContext(db, basePoll);
+  const spotlightPoll = context.spotlight_activity_id ? await getPoll(db, context.spotlight_activity_id) : basePoll;
+  if (!spotlightPoll) return json({ kind: "poll", displayState: "RECONNECTING", error: "Spotlight activity is unavailable." }, 404);
+  const aggregate = await getAggregate(db, spotlightPoll.activity_id);
+  const displayState = context.frozen_snapshot_json
+    ? "FROZEN_RESULTS"
+    : derivedPresenterState(spotlightPoll, aggregate.respondentCount, context);
+  const frozen = context.frozen_snapshot_json ? JSON.parse(context.frozen_snapshot_json) as { respondentCount: number; results: Array<{ optionId: string; label: string; isOther: boolean; count: number; percentage: number }> } : null;
+  let joinedCount: number;
+  let joinedNames: string[] = [];
+  if (spotlightPoll.session_id) {
+    const joined = await db.prepare(`SELECT COUNT(DISTINCT COALESCE(p.session_identity_id, p.id)) AS joined
+      FROM participants p JOIN activities a ON a.id = p.activity_id
+      WHERE a.session_id = ?`).bind(spotlightPoll.session_id).first<{ joined: number }>();
+    joinedCount = Number(joined?.joined ?? 0);
+    const names = await db.prepare(`SELECT DISTINCT p.display_name FROM participants p JOIN activities a ON a.id = p.activity_id
+      WHERE a.session_id = ? AND p.display_name IS NOT NULL ORDER BY p.display_name`).bind(spotlightPoll.session_id).all<{ display_name: string }>();
+    joinedNames = names.results.map((row) => row.display_name);
+  } else {
+    const joined = await db.prepare("SELECT COUNT(*) AS joined FROM participants WHERE activity_id = ?").bind(spotlightPoll.activity_id).first<{ joined: number }>();
+    joinedCount = Number(joined?.joined ?? 0);
+    if (spotlightPoll.identity_mode === "named") {
+      const names = await db.prepare("SELECT display_name FROM participants WHERE activity_id = ? ORDER BY joined_at").bind(spotlightPoll.activity_id).all<{ display_name: string }>();
+      joinedNames = names.results.map((row) => row.display_name);
+    }
+  }
+  const showResults = displayState === "LIVE_RESULTS" || displayState === "FINAL_RESULTS" || displayState === "FROZEN_RESULTS" || displayState === "EMPTY_RESULTS";
+  const sessionAccess = spotlightPoll.session_id ? await db.prepare("SELECT access_slug, join_pin FROM poll_session_access WHERE session_id = ?")
+    .bind(spotlightPoll.session_id).first<{ access_slug: string; join_pin: string }>() : null;
+  return json({ kind: "poll", title: spotlightPoll.title, question: spotlightPoll.question,
+    questionType: spotlightPoll.question_type, maxSelections: Number(spotlightPoll.max_selections),
+    activityId: spotlightPoll.activity_id, sessionId: spotlightPoll.session_id, sessionName: spotlightPoll.session_name,
+    accessSlug: spotlightPoll.access_slug, joinPin: spotlightPoll.join_pin,
+    sessionAccessSlug: sessionAccess?.access_slug ?? null, sessionJoinPin: sessionAccess?.join_pin ?? null,
+    displayState, presentationMode: spotlightPoll.presentation_mode, revealState: spotlightPoll.reveal_state,
+    revision: Number(context.revision), updatedAt: context.updated_at, joinedCount, joinedNames: displayState === "JOIN_LOBBY" ? joinedNames : [],
+    respondentCount: showResults ? Number(frozen?.respondentCount ?? aggregate.respondentCount) : undefined,
+    results: showResults ? (frozen?.results ?? aggregate.results) : undefined,
+    frozen: Boolean(context.frozen_snapshot_json), multiSelectNote: spotlightPoll.question_type === "multiple" ? "Percentages use respondents as the denominator and may total more than 100%." : null });
 }
 
 export { pollJoinRoute, pollOwnerRoute, pollParticipantRoute, pollPresenterRoute };

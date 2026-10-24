@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Link, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Bell, LogOut, Menu, Radio, Settings, X,
 } from "lucide-react";
@@ -10,12 +10,13 @@ import { BrandMark, Button, ErrorState, LoadingState, Mascot } from "./component
 import {
   ActivitySetupPage, ActivityLivePage, ActivityResultPage, CreateSessionPage, HomePage,
   JoinPage, ParticipantInfoPage, ParticipantRunnerPage, ParticipantDonePage, PresenterConsolePage,
-  PublicPresenterPage, ScarfDetailPage, SessionDetailPage, SessionsPage, ToolsPage, ArchivePage,
+  PublicPresenterPage, ScarfDetailPage, ScarfPublicPresenterPage, SessionDetailPage, SessionsPage, ToolsPage,
 } from "./pages";
 import { ScarfPersonalResultsPage } from "./scarf-participant";
 import { PollControlPage, PollEditorPage, PollParticipantPage, PollPresenterControlsPage, PollPublicPresenterPage, PollResultsPage, PollSessionJoinPage, PollToolOverviewPage } from "./poll-pages";
 import { WordCloudControlPage, WordCloudEditorPage, WordCloudOverviewPage, WordCloudPresenterControlsPage, WordCloudPublicPresenterPage, WordCloudResultsPage } from "./wordcloud-pages";
 import { ReflectionWallControlPage, ReflectionWallEditorPage, ReflectionWallParticipantPage, ReflectionWallPublicPresenterPage, ReflectionWallToolOverviewPage } from "./reflection-wall-pages";
+import { GdmActivityPage, GdmArchivePage, GdmRunPage, GdmSessionPage } from "./gdm-pages";
 
 const LearningBehaviorsAnalyticsPage = lazy(() => import("./learning-behaviors-pages").then((module) => ({ default: module.LearningBehaviorsAnalyticsPage })));
 const LearningBehaviorsControlPage = lazy(() => import("./learning-behaviors-pages").then((module) => ({ default: module.LearningBehaviorsControlPage })));
@@ -26,6 +27,15 @@ const LearningBehaviorsPublicPresenterPage = lazy(() => import("./learning-behav
 const LearningBehaviorsQuickNotePage = lazy(() => import("./learning-behaviors-pages").then((module) => ({ default: module.LearningBehaviorsQuickNotePage })));
 const LearningBehaviorsSetupPage = lazy(() => import("./learning-behaviors-pages").then((module) => ({ default: module.LearningBehaviorsSetupPage })));
 const LearningBehaviorsToolOverviewPage = lazy(() => import("./learning-behaviors-pages").then((module) => ({ default: module.LearningBehaviorsToolOverviewPage })));
+const QuizLibraryPage = lazy(() => import("./quiz-pages").then((module) => ({ default: module.QuizLibraryPage })));
+const QuizBuilderPage = lazy(() => import("./quiz-pages").then((module) => ({ default: module.QuizBuilderPage })));
+const QuizActivityPage = lazy(() => import("./quiz-pages").then((module) => ({ default: module.QuizActivityPage })));
+const QuizRunSetupPage = lazy(() => import("./quiz-pages").then((module) => ({ default: module.QuizRunSetupPage })));
+const QuizConsolePage = lazy(() => import("./quiz-pages").then((module) => ({ default: module.QuizConsolePage })));
+const QuizResultsPage = lazy(() => import("./quiz-pages").then((module) => ({ default: module.QuizResultsPage })));
+const QuizJoinPage = lazy(() => import("./quiz-pages").then((module) => ({ default: module.QuizJoinPage })));
+const QuizParticipantPage = lazy(() => import("./quiz-pages").then((module) => ({ default: module.QuizParticipantPage })));
+const QuizPresenterPage = lazy(() => import("./quiz-pages").then((module) => ({ default: module.QuizPresenterPage })));
 
 function LoginPage() {
   const { refresh } = useAuth();
@@ -65,6 +75,21 @@ function OwnerGate() {
   const location = useLocation();
   if (!authenticated) return <LoginPage key={location.pathname} />;
   return <Outlet />;
+}
+
+function StableActivityAccessPage() {
+  const { accessSlug = "" } = useParams();
+  const navigate = useNavigate();
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    void api<{ path: string }>("/join/activities/" + encodeURIComponent(accessSlug))
+      .then(({ path }) => { if (active) navigate(path, { replace: true }); })
+      .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "This Activity link is unavailable."); });
+    return () => { active = false; };
+  }, [accessSlug, navigate]);
+  if (error) return <main className="participant-page join-page"><BrandMark /><ErrorState message={error} /><Button to="/join">Enter an Activity code</Button></main>;
+  return <main className="participant-page join-page"><BrandMark /><LoadingState label="Opening the current Activity Run…" /></main>;
 }
 
 const navItems = [
@@ -108,21 +133,26 @@ function OwnerLayout() {
 }
 
 function PresenterRoute() {
-  const [kind, setKind] = useState<"poll" | "wordcloud" | "reflection-wall" | "learning-behaviors-reflection" | "standard" | "loading">("loading");
+  const [kind, setKind] = useState<"poll" | "wordcloud" | "reflection-wall" | "learning-behaviors-reflection" | "scarf-control" | "standard" | "loading">("loading");
   useEffect(() => {
     const token = window.location.hash.slice(1);
     api<{ kind?: string }>("/presenter", { headers: { Authorization: `Bearer ${token}` } })
-      .then((data) => setKind(data.kind === "poll" ? "poll" : data.kind === "wordcloud" ? "wordcloud" : data.kind === "reflection-wall" ? "reflection-wall" : data.kind === "learning-behaviors-reflection" ? "learning-behaviors-reflection" : "standard"))
+      .then((data) => setKind(data.kind === "poll" ? "poll" : data.kind === "wordcloud" ? "wordcloud" : data.kind === "reflection-wall" ? "reflection-wall" : data.kind === "learning-behaviors-reflection" ? "learning-behaviors-reflection" : data.kind === "scarf-control" ? "scarf-control" : "standard"))
       .catch(() => setKind("standard"));
   }, []);
   if (kind === "loading") return <div className="public-presenter"><LoadingState label="Connecting to the presenter screen…" /></div>;
   if (kind === "learning-behaviors-reflection") return <Suspense fallback={<main className="lbr-public-presenter"><LoadingState label="Connecting to Presenter Mode…" /></main>}><LearningBehaviorsPublicPresenterPage /></Suspense>;
+  if (kind === "scarf-control") return <ScarfPublicPresenterPage />;
   return kind === "poll" ? <PollPublicPresenterPage /> : kind === "wordcloud" ? <WordCloudPublicPresenterPage /> : kind === "reflection-wall" ? <ReflectionWallPublicPresenterPage /> : <PublicPresenterPage />;
 }
 
 function AppRoutes() {
   return <Routes>
+    <Route path="/activity/:accessSlug" element={<StableActivityAccessPage />} />
     <Route path="/join" element={<JoinPage />} />
+    <Route path="/quiz/join/:activityId" element={<Suspense fallback={<LoadingState label="Opening Quiz join…"/>}><QuizJoinPage/></Suspense>} />
+    <Route path="/quiz/run/:runId" element={<Suspense fallback={<LoadingState label="Opening Quiz…"/>}><QuizParticipantPage/></Suspense>} />
+    <Route path="/quiz/presenter/:runId" element={<Suspense fallback={<LoadingState label="Opening Quiz Presenter…"/>}><QuizPresenterPage/></Suspense>} />
     <Route path="/join/:pin/info" element={<ParticipantInfoPage />} />
     <Route path="/session/:accessSlug" element={<PollSessionJoinPage />} />
     <Route path="/poll/:accessSlug" element={<PollParticipantPage />} />
@@ -138,6 +168,13 @@ function AppRoutes() {
       <Route element={<OwnerLayout />}>
         <Route path="/" element={<HomePage />} />
         <Route path="/tools" element={<ToolsPage />} />
+        <Route path="/tools/quiz" element={<Suspense fallback={<LoadingState label="Opening Quiz library…"/>}><QuizLibraryPage/></Suspense>} />
+        <Route path="/quiz/definitions/new" element={<Suspense fallback={<LoadingState label="Opening Quiz Builder…"/>}><QuizBuilderPage/></Suspense>} />
+        <Route path="/quiz/definitions/:definitionId" element={<Suspense fallback={<LoadingState label="Opening Quiz Builder…"/>}><QuizBuilderPage/></Suspense>} />
+        <Route path="/quiz/activities/:activityId/new-run" element={<Suspense fallback={<LoadingState label="Opening Run setup…"/>}><QuizRunSetupPage/></Suspense>} />
+        <Route path="/quiz/activities/:activityId" element={<Suspense fallback={<LoadingState label="Opening Quiz Activity…"/>}><QuizActivityPage/></Suspense>} />
+        <Route path="/quiz/runs/:runId/results" element={<Suspense fallback={<LoadingState label="Opening Quiz results…"/>}><QuizResultsPage/></Suspense>} />
+        <Route path="/quiz/runs/:runId" element={<Suspense fallback={<LoadingState label="Opening Trainer Console…"/>}><QuizConsolePage/></Suspense>} />
         <Route path="/tools/scarf" element={<ScarfDetailPage />} />
         <Route path="/tools/poll" element={<PollToolOverviewPage />} />
         <Route path="/tools/wordcloud" element={<WordCloudOverviewPage />} />
@@ -169,7 +206,10 @@ function AppRoutes() {
         <Route path="/activities/:activityId/live" element={<ActivityLivePage />} />
         <Route path="/activities/:activityId/presenter" element={<PresenterConsolePage />} />
         <Route path="/results/:activityId" element={<ActivityResultPage />} />
-        <Route path="/archive" element={<ArchivePage />} />
+        <Route path="/archive" element={<GdmArchivePage />} />
+        <Route path="/gdm/sessions/:sessionId" element={<GdmSessionPage />} />
+        <Route path="/gdm/activities/:activityId" element={<GdmActivityPage />} />
+        <Route path="/gdm/runs/:runId" element={<GdmRunPage />} />
         <Route path="/live" element={<ActivityLiveIndex />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
@@ -185,7 +225,7 @@ function ActivityLiveIndex() {
   useEffect(() => { api<{ activities: typeof items }>("/owner/activities").then((data) => setItems(data.activities.filter((activity) => ["open", "paused"].includes(activity.state)))).catch((reason) => setError(reason.message)).finally(() => setLoading(false)); }, []);
   if (loading) return <LoadingState label="Checking live activities…" />;
   if (error) return <ErrorState message={error} />;
-  return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">LIVE ROOM</span><h1>Live Activity<span className="title-dot">.</span></h1><p>Monitor progress and control what participants can see.</p></div><Button to="/activities/new">New activity</Button></div>{items.length === 0 ? <div className="card"><div className="empty-state"><div className="empty-spark"><Radio /></div><h3>No live activities</h3><p>Launch an activity to welcome participants into the room.</p><Button to="/activities/new">Set up an activity</Button></div></div> : <div className="activity-list">{items.map((item) => <Link className="activity-row" key={item.id} to={item.tool_id === "wordcloud" ? `/wordclouds/${item.id}` : item.tool_id === "poll" ? `/polls/${item.id}` : item.tool_id === "reflection-wall" ? `/reflection-walls/${item.id}` : `/activities/${item.id}/live`}><div className="activity-icon"><Radio /></div><div className="activity-row-main"><strong>{item.title}</strong><small>{item.state === "open" ? "Accepting participants" : "Paused"}</small></div><Button variant="quiet">Open live room</Button></Link>)}</div>}</div>;
+  return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">LIVE ROOM</span><h1>Live Activity<span className="title-dot">.</span></h1><p>Monitor progress and control what participants can see.</p></div><Button to="/activities/new">New activity</Button></div>{items.length === 0 ? <div className="card"><div className="empty-state"><div className="empty-spark"><Radio /></div><h3>No live activities</h3><p>Launch an activity to welcome participants into the room.</p><Button to="/activities/new">Set up an activity</Button></div></div> : <div className="activity-list">{items.map((item) => <Link className="activity-row" key={item.id} to={item.tool_id === "quiz" ? `/quiz/activities/${item.id}` : item.tool_id === "wordcloud" ? `/wordclouds/${item.id}` : item.tool_id === "poll" ? `/polls/${item.id}` : item.tool_id === "reflection-wall" ? `/reflection-walls/${item.id}` : item.tool_id === "learning-behaviors-reflection" ? `/learning-behaviors/${item.id}` : `/activities/${item.id}/live`}><div className="activity-icon"><Radio /></div><div className="activity-row-main"><strong>{item.title}</strong><small>{item.state === "open" ? "Accepting participants" : "Paused"}</small></div><Button variant="quiet">Open live room</Button></Link>)}</div>}</div>;
 }
 
 function SettingsPage() {

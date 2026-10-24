@@ -6,24 +6,28 @@ import {
 
 interface WordCloudEnv { DB?: D1Database; SESSION_SECRET?: string }
 export type WordCloudParticipant = { id: string; activity_id: string; team_id: string | null; token_hash: string };
+type Phase = "DRAFT" | "READY" | "OPEN" | "CLOSED" | "ARCHIVED";
 
 type CloudConfig = {
-  activity_id: string; session_id: string | null; title: string; state: string; join_pin: string | null;
+  activity_id: string; session_id: string | null; title: string; state: string; join_pin: string | null; activity_access_slug: string;
   prompt: string; max_words: number; phase: "DRAFT" | "READY" | "OPEN" | "CLOSED" | "ARCHIVED";
   visibility: "HIDDEN" | "LIVE_REVEAL"; started_once: number; revision: number;
-  active_team_filter: string | null; access_slug: string; archived_at: string | null; session_name: string | null;
+  active_team_filter: string | null; presentation_mode: "LIVE_WORD_CLOUD" | "CLOSE_AND_REVEAL";
+  presenter_revealed: number; presenter_hidden_override: number; presenter_team_filter: string | null;
+  presentation_revision: number; access_slug: string; archived_at: string | null; session_name: string | null;
 };
 
 const WordCloudInput = z.object({
   title: z.string().trim().min(1).max(120),
   prompt: z.string().trim().min(1).max(200),
   maxWords: z.number().int().min(1).max(10).default(3),
+  presentationMode: z.enum(["LIVE_WORD_CLOUD", "CLOSE_AND_REVEAL"]).default("LIVE_WORD_CLOUD"),
   sessionId: z.string().uuid().nullable().optional(),
   teamNames: z.array(z.string().trim().min(1).max(50)).max(12).default([]),
   saveAsDraft: z.boolean().default(false),
 });
 const WordCloudEditInput = WordCloudInput.omit({ saveAsDraft: true }).extend({ sessionId: z.string().uuid().nullable(), expectedRevision: z.number().int().min(0) });
-const TransitionInput = z.object({ action: z.enum(["PUBLISH", "OPEN", "CLOSE", "REOPEN", "FINALIZE_ARCHIVE", "HIDE_PRESENTER", "LIVE_REVEAL"]), expectedRevision: z.number().int().min(0) });
+const TransitionInput = z.object({ action: z.enum(["PUBLISH", "OPEN", "CLOSE", "REOPEN", "FINALIZE_ARCHIVE", "HIDE_PRESENTER", "LIVE_REVEAL", "HIDE_RESULTS", "SHOW_LIVE", "REVEAL_RESULTS"]), expectedRevision: z.number().int().min(0) });
 const FilterInput = z.object({ teamId: z.string().uuid().nullable(), expectedRevision: z.number().int().min(0) });
 const ModerateInput = z.object({
   action: z.enum(["HIDE", "RESTORE", "MERGE", "UNMERGE"]),
@@ -65,11 +69,13 @@ async function body<T extends z.ZodTypeAny>(request: Request, schema: T): Promis
   catch { return null; }
 }
 async function configById(db: D1Database, activityId: string): Promise<CloudConfig | null> {
-  return db.prepare(`SELECT a.id AS activity_id, a.session_id, a.title, a.state, a.join_pin,
+  return db.prepare(`SELECT a.id AS activity_id, a.session_id, a.title, a.state, a.join_pin,a.access_slug AS activity_access_slug,
       s.name AS session_name, w.prompt, w.max_words, w.phase, w.visibility, w.started_once,
-      w.revision, w.active_team_filter, w.access_slug, w.archived_at
+      w.revision, w.active_team_filter, w.presentation_mode, w.presenter_revealed,
+      w.presenter_hidden_override, w.presenter_team_filter, w.presentation_revision,
+      w.access_slug, w.archived_at
     FROM activities a JOIN wordcloud_configs w ON w.activity_id = a.id
-    LEFT JOIN sessions s ON s.id = a.session_id WHERE a.id = ? AND a.tool_id = 'wordcloud'`)
+    LEFT JOIN sessions s ON s.id = a.session_id WHERE a.id = ? AND a.tool_id = 'wordcloud' AND a.deleted_at IS NULL`)
     .bind(activityId).first<CloudConfig>();
 }
 async function teamsFor(db: D1Database, activityId: string) {
@@ -122,12 +128,15 @@ async function trainerPayload(db: D1Database, config: CloudConfig, requestedTeam
       return { operationId: operation.operation_id, label: destination?.label ?? "Merged words", createdAt: operation.created_at };
     } catch { return { operationId: operation.operation_id, label: "Merged words", createdAt: operation.created_at }; }
   });
-  const joinPath = config.join_pin ? `/join?pin=${config.join_pin}` : null;
+  const joinPath = config.join_pin ? `/activity/${config.activity_access_slug}` : null;
   return {
     wordCloud: {
       activityId: config.activity_id, sessionId: config.session_id, sessionName: config.session_name,
       title: config.title, prompt: config.prompt, maxWords: Number(config.max_words), phase: config.phase,
       visibility: config.visibility, startedOnce: Boolean(config.started_once), revision: Number(config.revision),
+      presentationMode: config.presentation_mode, presenterRevealed: Boolean(config.presenter_revealed),
+      presenterHiddenOverride: Boolean(config.presenter_hidden_override), presenterTeamFilter: config.presenter_team_filter,
+      presentationRevision: Number(config.presentation_revision),
       joinPin: config.join_pin, joinPath, archivedAt: config.archived_at,
       activeTeamFilter: teamId ?? null, teamOfOneDisclosure: "Team results can be identifiable by context in very small groups.",
     },
@@ -136,6 +145,23 @@ async function trainerPayload(db: D1Database, config: CloudConfig, requestedTeam
     aggregate,
     mergeHistory,
   };
+}
+
+async function participantProgress(db: D1Database, config: CloudConfig, sessionSecret: string | undefined) {
+  const participants = await db.prepare(`
+    SELECT p.id, p.display_name, p.joined_at, t.name AS team_name
+    FROM participants p
+    LEFT JOIN teams t ON t.id = p.team_id
+    WHERE p.activity_id = ? ORDER BY p.joined_at, p.id
+  `).bind(config.activity_id).all<{ id: string; display_name: string; joined_at: string; team_name: string | null }>();
+  const rows = await Promise.all(participants.results.map(async (participant) => {
+    const submitted = sessionSecret ? await db.prepare(`
+      SELECT submitted FROM wordcloud_access_receipts WHERE activity_id = ? AND access_proof_hash = ?
+    `).bind(config.activity_id, await receiptHash(sessionSecret, config.activity_id, participant.id)).first<{ submitted: number }>() : null;
+    return { id: participant.id, displayName: participant.display_name, teamName: participant.team_name,
+      joinedAt: participant.joined_at, status: submitted?.submitted ? "Submitted" : "Joined" };
+  }));
+  return { participants: rows };
 }
 
 async function uniquePin(db: D1Database): Promise<string | null> {
@@ -164,11 +190,11 @@ async function createWordCloud(db: D1Database, data: z.infer<typeof WordCloudInp
   const statements: D1PreparedStatement[] = [
     db.prepare(`INSERT INTO activities (id, session_id, title, tool_id, state, result_policy, require_name, allow_teams,
         join_pin, instrument_version, scoring_version)
-      VALUES (?, ?, ?, 'wordcloud', 'draft', 'confirmation', 0, ?, ?, 'wordcloud-v1.0', 'distinct-frequency-v1')`)
+      VALUES (?, ?, ?, 'wordcloud', 'draft', 'confirmation', 1, ?, ?, 'wordcloud-v1.1', 'distinct-frequency-v1')`)
       .bind(activityId, sessionId, data.title.trim(), teamNames.length ? 1 : 0, pin),
-    db.prepare(`INSERT INTO wordcloud_configs (activity_id, prompt, max_words, phase, access_slug)
-      VALUES (?, ?, ?, ?, ?)`)
-      .bind(activityId, data.prompt.trim(), data.maxWords, phase, randomToken(16)),
+    db.prepare(`INSERT INTO wordcloud_configs (activity_id, prompt, max_words, phase, access_slug, presentation_mode)
+      VALUES (?, ?, ?, ?, ?, ?)`)
+      .bind(activityId, data.prompt.trim(), data.maxWords, phase, randomToken(16), data.presentationMode),
     db.prepare("INSERT INTO presentation_state (activity_id) VALUES (?)").bind(activityId),
   ];
   for (const teamName of teamNames) statements.push(db.prepare("INSERT INTO teams (id, activity_id, name) VALUES (?, ?, ?)").bind(newId(), activityId, teamName));
@@ -195,8 +221,11 @@ async function transitionWordCloud(db: D1Database, config: CloudConfig, action: 
     if (action.action === "REOPEN" && config.phase !== "CLOSED") return { error: "Only a Closed Word Cloud can be reopened.", code: "INVALID_STATE" } as const;
     const from = config.phase;
     const results = await db.batch([
-      db.prepare(`UPDATE wordcloud_configs SET phase = 'OPEN', started_once = 1, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
-        WHERE activity_id = ? AND phase = ? AND revision = ?`).bind(config.activity_id, from, action.expectedRevision),
+      db.prepare(`UPDATE wordcloud_configs SET phase = 'OPEN', started_once = 1, presenter_revealed = 0,
+        presenter_hidden_override = CASE WHEN ? = 'REOPEN' THEN 0 ELSE presenter_hidden_override END,
+        visibility = CASE WHEN ? = 'REOPEN' THEN 'HIDDEN' ELSE visibility END,
+        presentation_revision = presentation_revision + 1, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+        WHERE activity_id = ? AND phase = ? AND revision = ?`).bind(action.action, action.action, config.activity_id, from, action.expectedRevision),
       db.prepare(`UPDATE activities SET state = 'open', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND changes() = 1`)
         .bind(config.activity_id),
     ]);
@@ -205,7 +234,8 @@ async function transitionWordCloud(db: D1Database, config: CloudConfig, action: 
   if (action.action === "CLOSE") {
     if (config.phase !== "OPEN") return { error: "Only an Open Word Cloud can be closed.", code: "INVALID_STATE" } as const;
     const results = await db.batch([
-      db.prepare(`UPDATE wordcloud_configs SET phase = 'CLOSED', revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+      db.prepare(`UPDATE wordcloud_configs SET phase = 'CLOSED', revision = revision + 1,
+        presentation_revision = presentation_revision + 1, updated_at = CURRENT_TIMESTAMP
         WHERE activity_id = ? AND phase = 'OPEN' AND revision = ?`).bind(config.activity_id, action.expectedRevision),
       db.prepare(`UPDATE activities SET state = 'closed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND changes() = 1`)
         .bind(config.activity_id),
@@ -216,7 +246,8 @@ async function transitionWordCloud(db: D1Database, config: CloudConfig, action: 
     if (config.phase !== "CLOSED") return { error: "Close this Word Cloud before finalizing it.", code: "INVALID_STATE" } as const;
     const results = await db.batch([
       db.prepare(`UPDATE wordcloud_configs SET phase = 'ARCHIVED', archived_at = CURRENT_TIMESTAMP,
-        revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE activity_id = ? AND phase = 'CLOSED' AND revision = ?`)
+        revision = revision + 1, presentation_revision = presentation_revision + 1, updated_at = CURRENT_TIMESTAMP
+        WHERE activity_id = ? AND phase = 'CLOSED' AND revision = ?`)
         .bind(config.activity_id, action.expectedRevision),
       db.prepare(`UPDATE activities SET state = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND changes() = 1`)
         .bind(config.activity_id),
@@ -224,10 +255,21 @@ async function transitionWordCloud(db: D1Database, config: CloudConfig, action: 
     return Number(results[0]?.meta.changes ?? 0) === 1 ? { ok: true } as const : { error: "This activity changed in another tab. Refresh and try again.", code: "CONFLICT_VERSION" } as const;
   }
   if (config.phase === "ARCHIVED") return { error: "Archived results are read-only.", code: "ARCHIVED_READ_ONLY" } as const;
-  const visibility = action.action === "LIVE_REVEAL" ? "LIVE_REVEAL" : "HIDDEN";
-  const changed = await db.prepare(`UPDATE wordcloud_configs SET visibility = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
-    WHERE activity_id = ? AND revision = ? AND phase != 'ARCHIVED'`)
-    .bind(visibility, config.activity_id, action.expectedRevision).run();
+  const show = ["LIVE_REVEAL", "SHOW_LIVE", "REVEAL_RESULTS"].includes(action.action);
+  if (config.presentation_mode === "CLOSE_AND_REVEAL" && show && config.phase !== "CLOSED") {
+    return { error: "Close the activity before revealing Word Cloud results.", code: "REVEAL_REQUIRES_CLOSE" } as const;
+  }
+  const changed = config.presentation_mode === "LIVE_WORD_CLOUD"
+    ? await db.prepare(`UPDATE wordcloud_configs SET presenter_hidden_override = ?,
+        visibility = CASE WHEN ? = 1 THEN 'LIVE_REVEAL' ELSE 'HIDDEN' END,
+        revision = revision + 1, presentation_revision = presentation_revision + 1, updated_at = CURRENT_TIMESTAMP
+        WHERE activity_id = ? AND revision = ? AND phase != 'ARCHIVED'`)
+      .bind(show ? 0 : 1, show ? 1 : 0, config.activity_id, action.expectedRevision).run()
+    : await db.prepare(`UPDATE wordcloud_configs SET presenter_revealed = ?,
+        visibility = CASE WHEN ? = 1 THEN 'LIVE_REVEAL' ELSE 'HIDDEN' END,
+        revision = revision + 1, presentation_revision = presentation_revision + 1, updated_at = CURRENT_TIMESTAMP
+        WHERE activity_id = ? AND revision = ? AND phase != 'ARCHIVED'`)
+      .bind(show ? 1 : 0, show ? 1 : 0, config.activity_id, action.expectedRevision).run();
   return Number(changed.meta.changes ?? 0) === 1 ? { ok: true } as const : { error: "This activity changed in another tab. Refresh and try again.", code: "CONFLICT_VERSION" } as const;
 }
 
@@ -244,8 +286,9 @@ async function moderateWordCloud(db: D1Database, config: CloudConfig, action: z.
   const membership = Object.fromEntries(membershipRows.results.map((row) => [row.term_id, row.group_id]));
   const current = { groups, membership };
   const changedRevision = Number(config.revision) + 1;
-  const updateRevision = db.prepare(`UPDATE wordcloud_configs SET revision = revision + 1, updated_at = CURRENT_TIMESTAMP
-    WHERE activity_id = ? AND revision = ? AND phase IN ('OPEN','CLOSED')`).bind(config.activity_id, config.revision);
+  const updateRevision = db.prepare(`UPDATE wordcloud_configs SET revision = revision + 1, presentation_revision = presentation_revision + 1,
+      updated_at = CURRENT_TIMESTAMP
+      WHERE activity_id = ? AND revision = ? AND phase IN ('OPEN','CLOSED')`).bind(config.activity_id, config.revision);
   const persistOperation = (opId: string, type: string, before: unknown, after: unknown) => db.prepare(`INSERT INTO wordcloud_moderation_operations
     (operation_id, activity_id, op_type, before_state_json, after_state_json, resulting_revision)
     VALUES (?, ?, ?, ?, ?, ?)`).bind(opId, config.activity_id, type, JSON.stringify(before), JSON.stringify(after), changedRevision);
@@ -324,7 +367,7 @@ export async function wordCloudOwnerRoute(request: Request, env: WordCloudEnv, u
         s.name AS session_name, w.prompt, w.phase, w.visibility, w.max_words, w.revision,
         (SELECT COUNT(*) FROM participants p WHERE p.activity_id = a.id) AS joined_count,
         (SELECT COUNT(*) FROM wordcloud_anonymous_submissions sub WHERE sub.activity_id = a.id) AS submitted_count
-      FROM activities a JOIN wordcloud_configs w ON w.activity_id = a.id LEFT JOIN sessions s ON s.id = a.session_id
+      FROM activities a JOIN wordcloud_configs w ON w.activity_id = a.id LEFT JOIN sessions s ON s.id = a.session_id WHERE a.deleted_at IS NULL
       ORDER BY a.updated_at DESC`).all();
     return json({ wordClouds: rows.results });
   }
@@ -337,7 +380,7 @@ export async function wordCloudOwnerRoute(request: Request, env: WordCloudEnv, u
     if ("error" in created && created.error) return fail(created.error, 503);
     return json({ activityId: created.activityId, phase: created.phase }, 201);
   }
-  const match = url.pathname.match(/^\/api\/owner\/wordclouds\/([0-9a-f-]+)(?:\/(transition|moderate|team-filter|duplicate|export))?$/i);
+  const match = url.pathname.match(/^\/api\/owner\/wordclouds\/([0-9a-f-]+)(?:\/(transition|moderate|team-filter|presenter-team-filter|progress|duplicate|export))?$/i);
   if (!match) return fail("Word Cloud activity not found.", 404);
   const activityId = match[1]!;
   const action = match[2];
@@ -346,6 +389,9 @@ export async function wordCloudOwnerRoute(request: Request, env: WordCloudEnv, u
   if (request.method === "GET" && !action) {
     try { return json(await trainerPayload(db, config)); }
     catch (reason) { return fail(reason instanceof Error ? reason.message : "Could not load Word Cloud results.", 400, "INVALID_TEAM"); }
+  }
+  if (request.method === "GET" && action === "progress") {
+    return json(await participantProgress(db, config, env.SESSION_SECRET));
   }
   if (request.method === "PATCH" && !action) {
     if (config.started_once || !["DRAFT", "READY"].includes(config.phase)) return fail("This Word Cloud is locked after it has opened.", 409, "CONFIG_LOCKED");
@@ -359,8 +405,8 @@ export async function wordCloudOwnerRoute(request: Request, env: WordCloudEnv, u
     }
     const editNonce = randomToken(16);
     const statements: D1PreparedStatement[] = [
-      db.prepare(`UPDATE wordcloud_configs SET prompt = ?, max_words = ?, edit_nonce = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
-        WHERE activity_id = ? AND phase IN ('DRAFT','READY') AND started_once = 0 AND revision = ?`).bind(data.prompt.trim(), data.maxWords, editNonce, activityId, data.expectedRevision),
+      db.prepare(`UPDATE wordcloud_configs SET prompt = ?, max_words = ?, presentation_mode = ?, edit_nonce = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+        WHERE activity_id = ? AND phase IN ('DRAFT','READY') AND started_once = 0 AND revision = ?`).bind(data.prompt.trim(), data.maxWords, data.presentationMode, editNonce, activityId, data.expectedRevision),
       db.prepare(`UPDATE activities SET title = ?, allow_teams = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND tool_id = 'wordcloud'
         AND EXISTS (SELECT 1 FROM wordcloud_configs WHERE activity_id = ? AND revision = ? AND edit_nonce = ? AND started_once = 0)`)
         .bind(data.title.trim(), teamNames.length ? 1 : 0, activityId, activityId, data.expectedRevision + 1, editNonce),
@@ -406,9 +452,21 @@ export async function wordCloudOwnerRoute(request: Request, env: WordCloudEnv, u
     const updated = await configById(db, activityId);
     return json(updated ? await trainerPayload(db, updated) : { ok: true });
   }
+  if (request.method === "POST" && action === "presenter-team-filter") {
+    const data = await body(request, FilterInput);
+    if (!data) return fail("Choose a valid Presenter Team filter.");
+    if (data.expectedRevision !== Number(config.revision)) return fail("This activity changed in another tab. Refresh and try again.", 409, "CONFLICT_VERSION");
+    if (data.teamId && !await db.prepare("SELECT id FROM teams WHERE id = ? AND activity_id = ?").bind(data.teamId, activityId).first()) return fail("Team not found for this activity.", 404, "INVALID_TEAM");
+    const result = await db.prepare(`UPDATE wordcloud_configs SET presenter_team_filter = ?,
+        revision = revision + 1, presentation_revision = presentation_revision + 1, updated_at = CURRENT_TIMESTAMP
+      WHERE activity_id = ? AND revision = ? AND phase != 'ARCHIVED'`).bind(data.teamId, activityId, config.revision).run();
+    if (Number(result.meta.changes ?? 0) !== 1) return fail("This activity changed in another tab. Refresh and try again.", 409, "CONFLICT_VERSION");
+    const updated = await configById(db, activityId);
+    return json(updated ? await trainerPayload(db, updated) : { ok: true });
+  }
   if (request.method === "POST" && action === "duplicate") {
     const teamNames = (await teamsFor(db, activityId)).map((team) => team.name);
-    const duplicate = await createWordCloud(db, { title: `${config.title} copy`, prompt: config.prompt, maxWords: Number(config.max_words), sessionId: config.session_id, teamNames, saveAsDraft: true });
+    const duplicate = await createWordCloud(db, { title: `${config.title} copy`, prompt: config.prompt, maxWords: Number(config.max_words), presentationMode: config.presentation_mode, sessionId: config.session_id, teamNames, saveAsDraft: true });
     if (!duplicate || "error" in duplicate) return fail("Could not duplicate this Word Cloud.", 400);
     return json({ activityId: duplicate.activityId }, 201);
   }
@@ -505,7 +563,10 @@ export async function wordCloudParticipantRoute(request: Request, env: WordCloud
           AND EXISTS (SELECT 1 FROM wordcloud_terms WHERE term_id = ? AND activity_id = ?)`)
         .bind(submissionId, termId, word.normalized, submissionId, termId, config.activity_id));
     }
-    statements.push(db.prepare(`UPDATE wordcloud_configs SET revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+    statements.push(db.prepare(`UPDATE wordcloud_configs SET revision = revision + 1,
+      presentation_revision = presentation_revision + 1,
+      visibility = CASE WHEN presentation_mode = 'LIVE_WORD_CLOUD' AND presenter_hidden_override = 0 THEN 'LIVE_REVEAL' ELSE visibility END,
+      updated_at = CURRENT_TIMESTAMP
       WHERE activity_id = ? AND EXISTS (SELECT 1 FROM wordcloud_anonymous_submissions WHERE submission_id = ?)`)
       .bind(config.activity_id, submissionId));
     statements.push(db.prepare(`UPDATE activities SET updated_at = CURRENT_TIMESTAMP WHERE id = ?
@@ -529,17 +590,41 @@ export async function wordCloudPresenterRoute(request: Request, env: WordCloudEn
   const db = dbFor(env);
   if (!db || request.method !== "GET") return null;
   const tokenHash = await sha256(token);
-  const activity = await db.prepare(`SELECT a.id AS activity_id, a.title, w.prompt, w.phase, w.visibility, w.revision, w.active_team_filter
+  const activity = await db.prepare(`SELECT a.id AS activity_id, a.title, a.join_pin, a.access_slug AS activity_access_slug,
+      s.name AS session_name, w.prompt, w.phase, w.visibility, w.revision, w.presentation_mode,
+      w.presenter_revealed, w.presenter_hidden_override, w.presenter_team_filter, w.presentation_revision
     FROM activities a JOIN wordcloud_configs w ON w.activity_id = a.id
-    WHERE a.presenter_token_hash = ? AND a.tool_id = 'wordcloud'`).bind(tokenHash)
-    .first<{ activity_id: string; title: string; prompt: string; phase: string; visibility: string; revision: number; active_team_filter: string | null }>();
+    LEFT JOIN sessions s ON s.id = a.session_id
+    WHERE a.presenter_token_hash = ? AND a.tool_id = 'wordcloud' AND a.deleted_at IS NULL`).bind(tokenHash)
+    .first<{ activity_id: string; title: string; join_pin: string | null; activity_access_slug: string | null; session_name: string | null;
+      prompt: string; phase: Phase; visibility: string; revision: number; presentation_mode: "LIVE_WORD_CLOUD" | "CLOSE_AND_REVEAL";
+      presenter_revealed: number; presenter_hidden_override: number; presenter_team_filter: string | null; presentation_revision: number }>();
   if (!activity) return null;
-  const base = { kind: "wordcloud", title: activity.title, prompt: activity.prompt, phase: activity.phase, visibility: activity.visibility, revision: Number(activity.revision) };
-  if (activity.visibility !== "LIVE_REVEAL") return json(base);
-  const aggregate = await aggregateForActivity(db, activity.activity_id, activity.active_team_filter);
-  const team = activity.active_team_filter
-    ? await db.prepare("SELECT name FROM teams WHERE id = ? AND activity_id = ?").bind(activity.active_team_filter, activity.activity_id).first<{ name: string }>()
-    : null;
-  return json({ ...base, teamName: team?.name ?? "All teams", submittedCount: aggregate.submissionCount,
-    cloudTop50: aggregate.cloudTop50.map(({ label, frequency, percentage }) => ({ label, frequency, percentage })) });
+  const mode = activity.presentation_mode;
+  const aggregate = await aggregateForActivity(db, activity.activity_id, activity.presenter_team_filter);
+  const hasCloud = aggregate.cloudTop50.length > 0;
+  const hidden = Boolean(activity.presenter_hidden_override);
+  const revealed = Boolean(activity.presenter_revealed);
+  const view: "JOIN_LOBBY" | "LIVE_CLOUD" | "ACTIVITY_CLOSED" | "FINAL_CLOUD" = mode === "LIVE_WORD_CLOUD"
+    ? ["READY", "DRAFT"].includes(activity.phase) ? "JOIN_LOBBY"
+      : activity.phase === "OPEN" ? hasCloud && !hidden ? "LIVE_CLOUD" : "JOIN_LOBBY"
+        : hasCloud && !hidden ? "FINAL_CLOUD" : "ACTIVITY_CLOSED"
+    : ["READY", "OPEN", "DRAFT"].includes(activity.phase) ? "JOIN_LOBBY"
+      : revealed && hasCloud ? "FINAL_CLOUD" : "ACTIVITY_CLOSED";
+  const base = { kind: "wordcloud", title: activity.title, prompt: activity.prompt, phase: activity.phase,
+    mode, view, revision: Number(activity.presentation_revision ?? activity.revision),
+    sessionName: activity.session_name, joinPin: activity.join_pin,
+    joinPath: activity.activity_access_slug ? `/activity/${activity.activity_access_slug}` : null,
+    teamName: activity.presenter_team_filter
+      ? (await db.prepare("SELECT name FROM teams WHERE id = ? AND activity_id = ?").bind(activity.presenter_team_filter, activity.activity_id).first<{ name: string }>())?.name ?? "All teams"
+      : "All teams" };
+  if (view === "JOIN_LOBBY") {
+    const joined = await db.prepare("SELECT display_name FROM participants WHERE activity_id = ? ORDER BY joined_at, id")
+      .bind(activity.activity_id).all<{ display_name: string }>();
+    return json({ ...base, joinedCount: joined.results.length, participants: joined.results.map((row) => row.display_name) });
+  }
+  if (view === "LIVE_CLOUD" || view === "FINAL_CLOUD") {
+    return json({ ...base, cloudTop50: aggregate.cloudTop50.map(({ label, frequency, percentage }) => ({ label, frequency, percentage })) });
+  }
+  return json({ ...base });
 }

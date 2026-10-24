@@ -1,5 +1,36 @@
 # Build status
 
+## Word Cloud Control Room & Presenter v1.1 — implemented and verified locally (2026-10-24)
+
+- Read the supplied v1.1 PDF, detailed Markdown specification, delivery/acceptance documents, legacy references, and all eight approved UI PNGs before implementation. The update remains additive: the existing Word Cloud submission, moderation, scoring/aggregation, Activity/Session architecture and unrelated modules are preserved.
+- Added one Control Room with QR/link/PIN, named live lobby participation progress, joined/submitted status, private anonymous aggregate preview, separate Presenter team filtering and explicit Live Word Cloud / Close & Reveal controls. Existing global TrainerPopp!Kit appshell remains in use; the new module UI follows the supplied warm ivory, electric blue, orange, pink and dark Presenter direction.
+- Added Presenter state handling for `JOIN_LOBBY`, `LIVE_CLOUD`, `ACTIVITY_CLOSED` and `FINAL_CLOUD`. Presenter payloads expose only safe display names in the lobby and aggregate word labels/frequencies after reveal; names, status, timestamps and word ownership are excluded from cloud/closed/final views. Presenter opens in a separate tab and synchronizes through short polling with monotonic revisions.
+- Added local D1 migration `0016_wordcloud_control_presenter_v11.sql`, named Word Cloud join requirement, mode-aware lifecycle guards, automatic Live-mode reveal, Close & Reveal close gating, emergency hide/reopen behavior, presenter-team scope, participant progress endpoint and v1.1 smoke coverage.
+- Verification: `npm test -- --run` → 11 files / 63 tests; `npm run smoke` → 1,029 local Worker/D1 assertions; `npm run typecheck`, `npm run lint`, `npm run build`, `git diff --check`, and local migration application pass. Chrome QA verified the editor mode cards, Control Room, named participant progress and separate live Presenter tab. Build retains the existing non-blocking client chunk-size warning; numeric 95% pixel fidelity is not certified.
+- Remote D1/deployment was not changed. Remaining limitation: short polling is used instead of WebSockets/Durable Objects, so production latency/reconnect behavior and live workshop UAT remain to be verified.
+
+## SCARF Control Room & Presenter v1.3 — implemented and verified locally (2026-10-24)
+
+- Read the supplied v1.3 PDF, detailed Markdown specification, README/Codex handoff, and all seven approved UI PNGs before implementation. The update keeps the existing 30-question bank, scoring v1.1, Activity/Session architecture and unrelated modules intact.
+- Replaced the SCARF live surface with one trainer Control Room: QR/link/PIN, live named participants, answer progress, submission counts, private Needs preview, personal-result release and a single Presenter action hierarchy. The old SCARF Presenter Controls route now returns to this Control Room instead of exposing duplicate restrictions.
+- Added the explicit Presenter state machine `lobby → closed_waiting → heatmap_revealed`, separate read-only Presenter tab, live named join lobby, Activity Closed screen, named Individual heatmap, optional Team view and Personal Pattern / Compared to Class selection. Presenter polling is 1.5 seconds; trainer room polling is 3 seconds and authoritative Worker state controls reconnects.
+- Personal Results release is independent from Presenter reveal. SCARF remains named, Individual heatmap reveal works with one completed participant, class comparison requires two compatible profiles, and Team view requires two configured teams with usable submitted profiles. Presenter responses contain names/status/scores only after the appropriate stage and never raw answer records.
+- Added local D1 migration `0015_scarf_control_presenter_v13.sql` for the separate stage/view/comparison state. The smoke suite now covers lobby, independent release, close gating, one-or-more named heatmap reveal, team/class switching, raw-answer exclusion and Presenter synchronization.
+- Verification: `npm test -- --run` → 11 files / 63 tests; `npm run smoke` → 1,026 local Worker/D1 assertions; `npm run typecheck`, `npm run lint`, `npm run build`, and local migration application pass. Chrome QA verified the trainer Control Room, separate Join Lobby, live transition to Activity Closed, and one-participant named heatmap reveal. Build retains the existing non-blocking client chunk-size warning; numeric 95% pixel fidelity is not certified.
+- Remote D1/deployment was not changed. Current limitation: synchronization uses short polling rather than WebSockets/Durable Objects, so production latency and reconnect behavior still need live workshop UAT.
+
+## Global Data Management v1.0 — local implementation (2026-10-23)
+
+- Added migrations `0013_global_data_management.sql` and `0014_stable_activity_access.sql`; both are applied to local D1. Integrated Session, Activity and Run provenance/history, stable Activity URLs, reset and new-Run flows, Session archive snapshots, 30-day Trash/restore/purge, bulk-delete preview and deduplicated Archive CSV/Excel-readable exports. Added trainer-only Run result review and applied current-Run privacy boundaries across modules.
+- Verification after the latest implementation: `npm test` → 11 files / 63 tests; `npm run smoke:gdm` → 83 Worker/D1 assertions; `npm run smoke:quiz` passes; `npm run smoke` → 1,023 cross-tool assertions. Typecheck, lint and production build pass; build retains a non-blocking client chunk size warning. See `docs/GDM_AUDIT.md` for the 36-decision crosswalk.
+- Start New Run, Reset, Session archive snapshots, Delete, Restore and per-package expiry purge now use D1 transaction batches. The mutation receipt is stored just after its data transaction; a Worker stop in that narrow gap leaves a committed state and retry conflict, not a partial cascade. Excel downloads are HTML tables with `.xls` extension, not native `.xlsx`. Remote deployment, scheduled purge timing/recovery and trainer-led UAT were not verified.
+
+## Quiz v1.0 — local implementation (2026-10-23)
+
+- Integrated text-only Quiz into the existing Cloudflare Worker/D1 app and Popp! shell. Migration `0012_quiz.sql` is applied locally only. Definition versioning, Session/Activity links, sequential Run snapshots, scoped guest tokens, Live Manual/Automatic and Self-paced flows, Hope scoring, Team results, corrections, audit/CSV and read-only Presenter are implemented.
+- Verification: 60 unit tests pass; typecheck, lint, build and `git diff --check` pass. The Quiz Worker/D1 smoke passes Live, Self-paced, Automatic timing, privacy, corrections, a six-person Workshop and Session archive/reopen guards. Existing cross-tool smoke passes 1,020 assertions. A separate attempt against a second simultaneously running dev server hit local SQLite `SQLITE_BUSY`; rerunning against the original server passed all 1,020 assertions. A 200-participant local Quiz load run accepted all 200 concurrent Live answers with zero errors: p50 540 ms, p95 968 ms, p99 968 ms; lock acknowledgement 18 ms, one subsequent guest state read 8 ms. These local D1 timings are not a production capacity guarantee.
+- Public mobile join/lobby was visually inspected and adjusted for narrow screens. Trainer and Presenter views were not fully reviewed against every pack image. There is no claim of numeric pixel fidelity, 200-user load capacity, authenticated production UAT, remote migration or deployment. The existing main client bundle still emits a non-blocking Vite size warning.
+
 ## Latest cross-tool audit — 2026-10-23
 
 - Production `/api/health` returned 200 with D1 and owner authentication configured. The public client bundle contains the Learning Behaviors Reflection module, and the remote D1 migration list reports no pending migrations. No authenticated production owner or six-participant workshop flow was exercised.
@@ -32,7 +63,7 @@
 
 
 Status: Reflection Wall v1.0, Poll v1.2, SCARF v1.1, Word Cloud v1.0, and Learning Behaviors Reflection v1.0 are implemented. Production health, client bundle presence and current remote migrations were verified; authenticated live-class UAT and numeric UI similarity remain unverified.
-Last updated: 2026-10-23
+Last updated: 2026-10-24
 
 ## Poll Module v1.2 — current milestone
 

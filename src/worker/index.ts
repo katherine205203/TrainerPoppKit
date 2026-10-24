@@ -6,6 +6,8 @@ import { pollJoinRoute, pollOwnerRoute, pollParticipantRoute, pollPresenterRoute
 import { wordCloudOwnerRoute, wordCloudParticipantRoute, wordCloudPresenterRoute } from "./wordcloud";
 import { reflectionGuestRoute, reflectionLookup, reflectionOwnerRoute, reflectionPresenterRoute } from "./reflection-wall";
 import { learningBehaviorsOwnerRoute, learningBehaviorsParticipantRoute, learningBehaviorsPresenterRoute } from "./learning-behaviors";
+import { quizOwnerRoute, quizPublicRoute } from "./quiz";
+import { gdmOwnerRoute, gdmPurgeExpired, registerQuizRun, syncRunState } from "./gdm";
 import { LBR_TOOL_ID } from "../domain/learning-behaviors";
 import {
   bearerToken,
@@ -30,11 +32,13 @@ type ActivityRow = {
   id: string;
   session_id: string | null;
   title: string;
+  tool_id: string;
   state: string;
   result_policy: "trainer_reveal" | "immediate" | "confirmation";
   require_name: number;
   allow_teams: number;
   join_pin: string | null;
+  access_slug: string;
   instrument_version: string;
   scoring_version: string;
   session_name?: string | null;
@@ -153,9 +157,9 @@ async function rateLimitRequest(request: Request, env: Env, scope: "login" | "lo
 
 async function ownerActivity(db: D1Database, activityId: string): Promise<ActivityRow | null> {
   return db.prepare(`
-    SELECT a.id, a.session_id, a.title, a.state, a.result_policy, a.require_name, a.allow_teams,
-      a.join_pin, a.instrument_version, a.scoring_version, s.name AS session_name
-    FROM activities a LEFT JOIN sessions s ON s.id = a.session_id WHERE a.id = ?
+    SELECT a.id, a.session_id, a.title, a.tool_id, a.state, a.result_policy, a.require_name, a.allow_teams,
+      a.join_pin, a.access_slug, a.instrument_version, a.scoring_version, s.name AS session_name
+    FROM activities a LEFT JOIN sessions s ON s.id = a.session_id WHERE a.id = ? AND a.deleted_at IS NULL
   `).bind(activityId).first<ActivityRow>();
 }
 
@@ -164,8 +168,8 @@ async function guestParticipant(request: Request, db: D1Database): Promise<Parti
   if (!token || token.length > 256) return null;
   const tokenHash = await sha256(token);
   const participant = await db.prepare(`
-    SELECT id, activity_id, team_id, display_name, consent_named_results, token_hash
-    FROM participants WHERE token_hash = ?
+    SELECT p.id, p.activity_id, p.team_id, p.display_name, p.consent_named_results, p.token_hash
+    FROM participants p JOIN activities a ON a.id=p.activity_id WHERE p.token_hash = ? AND a.deleted_at IS NULL
   `).bind(tokenHash).first<ParticipantRow>();
   if (participant) {
     await db.prepare("UPDATE participants SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").bind(participant.id).run();
@@ -178,24 +182,51 @@ async function ownerRoute(request: Request, env: Env, url: URL): Promise<Respons
   if (!await ownerAllowed(request, env)) return fail("Owner sign-in required.", 401);
   const db = database(env);
   if (!db) return fail("D1 database is not configured.", 503);
+  const ownerDb = db;
+
+  const gdmResponse = await gdmOwnerRoute(request, env, url);
+  if (gdmResponse) return gdmResponse;
+
+  async function syncGdmResponse(response: Response): Promise<Response> {
+    if (!response.ok) return response;
+    const quizRunPath = url.pathname.match(/^\/api\/owner\/quiz\/activities\/([0-9a-f-]+)\/runs$/i);
+    if (quizRunPath && request.method === "POST") {
+      await registerQuizRun(env, quizRunPath[1]!, response);
+      return response;
+    }
+    let activityId = url.pathname.match(/^\/api\/owner\/(?:activities|polls|wordclouds|reflection-walls|learning-behaviors|scarf\/activities|quiz\/activities)\/([0-9a-f-]+)/i)?.[1] ?? null;
+    if (url.pathname.match(/^\/api\/owner\/quiz\/runs\/([0-9a-f-]+)/i)) {
+      activityId = (await ownerDb.prepare("SELECT activity_id FROM quiz_runs WHERE id=?").bind(url.pathname.match(/^\/api\/owner\/quiz\/runs\/([0-9a-f-]+)/i)![1]).first<{activity_id:string}>())?.activity_id ?? null;
+    }
+    if (!activityId && request.method === "POST") {
+      const payload = await response.clone().json().catch(() => null) as { activity?: { id?: string }; id?: string } | null;
+      activityId = payload?.activity?.id ?? payload?.id ?? null;
+    }
+    if (activityId) await syncRunState(ownerDb, activityId);
+    return response;
+  }
+
+  const quizResponse = await quizOwnerRoute(request, db, url);
+  if (quizResponse) return syncGdmResponse(quizResponse);
 
   const learningBehaviorsResponse = await learningBehaviorsOwnerRoute(request, env, url);
-  if (learningBehaviorsResponse) return learningBehaviorsResponse;
+  if (learningBehaviorsResponse) return syncGdmResponse(learningBehaviorsResponse);
   const pollResponse = await pollOwnerRoute(request, env, url);
-  if (pollResponse) return pollResponse;
+  if (pollResponse) return syncGdmResponse(pollResponse);
   const reflectionResponse = await reflectionOwnerRoute(request, env, url);
-  if (reflectionResponse) return reflectionResponse;
+  if (reflectionResponse) return syncGdmResponse(reflectionResponse);
   const wordCloudResponse = await wordCloudOwnerRoute(request, env, url);
-  if (wordCloudResponse) return wordCloudResponse;
-  if (url.pathname.startsWith("/api/owner/scarf/")) return scarfOwnerRoute(request, env, url);
+  if (wordCloudResponse) return syncGdmResponse(wordCloudResponse);
+  if (url.pathname.startsWith("/api/owner/scarf/")) return syncGdmResponse(await scarfOwnerRoute(request, env, url));
 
   if (request.method === "GET" && url.pathname === "/api/owner/sessions") {
     const { results } = await db.prepare(`
       SELECT s.*, COUNT(DISTINCT a.id) AS activity_count,
         ((SELECT COUNT(*) FROM participants p JOIN activities ax ON ax.id = p.activity_id WHERE ax.session_id = s.id) +
-         (SELECT COUNT(*) FROM reflection_wall_actors rw JOIN activities ar ON ar.id = rw.activity_id WHERE ar.session_id = s.id)) AS participant_count
-      FROM sessions s LEFT JOIN activities a ON a.session_id = s.id
-      GROUP BY s.id ORDER BY s.updated_at DESC
+         (SELECT COUNT(*) FROM reflection_wall_actors rw JOIN activities ar ON ar.id = rw.activity_id WHERE ar.session_id = s.id) +
+         (SELECT COUNT(*) FROM quiz_run_participants qp JOIN quiz_runs qr ON qr.id = qp.run_id JOIN activities aq ON aq.id = qr.activity_id WHERE aq.session_id = s.id)) AS participant_count
+      FROM sessions s LEFT JOIN activities a ON a.session_id = s.id AND a.deleted_at IS NULL
+      WHERE s.deleted_at IS NULL GROUP BY s.id ORDER BY s.updated_at DESC
     `).all();
     return json({ sessions: results });
   }
@@ -212,16 +243,28 @@ async function ownerRoute(request: Request, env: Env, url: URL): Promise<Respons
   }
 
   const sessionMatch = url.pathname.match(/^\/api\/owner\/sessions\/([0-9a-f-]+)$/i);
+  const sessionStatusMatch = url.pathname.match(/^\/api\/owner\/sessions\/([0-9a-f-]+)\/(archive|reopen)$/i);
+  if (request.method === "POST" && sessionStatusMatch) {
+    const sessionId = sessionStatusMatch[1]!, action = sessionStatusMatch[2]!;
+    const session = await db.prepare("SELECT status FROM sessions WHERE id = ? AND deleted_at IS NULL").bind(sessionId).first<{status:string}>();
+    if (!session) return fail("Session not found.", 404);
+    if (action === "archive" && session.status === "completed") return fail("Session is already archived.", 409);
+    if (action === "reopen" && session.status !== "completed") return fail("Session is not archived.", 409);
+    if (action === "archive" && await db.prepare("SELECT id FROM activities WHERE session_id=? AND deleted_at IS NULL AND state IN ('open','paused') LIMIT 1").bind(sessionId).first()) return fail("End every Live or Paused Run before archiving this Session.", 409);
+    const status = action === "archive" ? "completed" : "upcoming";
+    await db.prepare("UPDATE sessions SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(status,sessionId).run();
+    return json({ status });
+  }
   if (request.method === "PATCH" && sessionMatch) {
     const data = await readBody(request, SessionInput);
     if (!data) return fail("Check the session details and try again.", 400);
     const sessionId = sessionMatch[1]!;
-    if (!await db.prepare("SELECT id FROM sessions WHERE id = ?").bind(sessionId).first()) return fail("Session not found.", 404);
+    if (!await db.prepare("SELECT id FROM sessions WHERE id = ? AND deleted_at IS NULL").bind(sessionId).first()) return fail("Session not found.", 404);
     await db.prepare(`
       UPDATE sessions SET name = ?, description = ?, starts_at = ?, location = ?, expected_participants = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).bind(data.name, data.description, data.startsAt ?? null, data.location, data.expectedParticipants, sessionId).run();
-    const session = await db.prepare("SELECT * FROM sessions WHERE id = ?").bind(sessionId).first();
+    const session = await db.prepare("SELECT * FROM sessions WHERE id = ? AND deleted_at IS NULL").bind(sessionId).first();
     return json({ session });
   }
   if (request.method === "GET" && sessionMatch) {
@@ -229,34 +272,8 @@ async function ownerRoute(request: Request, env: Env, url: URL): Promise<Respons
     const session = await db.prepare("SELECT * FROM sessions WHERE id = ?").bind(sessionId).first();
     if (!session) return fail("Session not found.", 404);
     const { results: activities } = await db.prepare(`
-      SELECT a.*, (SELECT COUNT(*) FROM participants p WHERE p.activity_id = a.id) AS participant_count,
-        CASE WHEN a.tool_id = 'poll'
-          THEN (SELECT COUNT(*) FROM poll_participations pp WHERE pp.activity_id = a.id AND pp.has_submitted = 1)
-          WHEN a.tool_id = 'wordcloud'
-          THEN (SELECT COUNT(*) FROM wordcloud_anonymous_submissions wc WHERE wc.activity_id = a.id)
-          WHEN a.tool_id = 'reflection-wall'
-          THEN (SELECT COUNT(*) FROM reflection_wall_posts rw WHERE rw.activity_id = a.id)
-          WHEN a.tool_id = 'scarf-assessment'
-          THEN (SELECT COUNT(*) FROM scarf_participations sp WHERE sp.activity_id = a.id AND sp.status = 'submitted')
-          WHEN a.tool_id = 'learning-behaviors-reflection'
-          THEN (SELECT COUNT(*) FROM lbr_progress lp WHERE lp.activity_id = a.id AND lp.self_locked_at IS NOT NULL)
-          ELSE (SELECT COUNT(*) FROM submissions sub WHERE sub.activity_id = a.id AND sub.status = 'submitted') END AS submitted_count
-      FROM activities a WHERE a.session_id = ? ORDER BY a.created_at
-    `).bind(sessionId).all();
-    const { results: teams } = await db.prepare(`
-      SELECT t.id, t.name, t.activity_id, a.title AS activity_title, COUNT(p.id) AS participant_count
-      FROM teams t JOIN activities a ON a.id = t.activity_id
-      LEFT JOIN participants p ON p.team_id = t.id AND p.activity_id = t.activity_id
-      WHERE a.session_id = ? GROUP BY t.id, t.name, t.activity_id, a.title ORDER BY t.created_at
-    `).bind(sessionId).all();
-    return json({ session, activities, teams });
-  }
-
-  if (request.method === "GET" && url.pathname === "/api/owner/activities") {
-    const { results } = await db.prepare(`
-      SELECT a.*, s.name AS session_name,
-        CASE WHEN a.tool_id = 'reflection-wall'
-          THEN (SELECT COUNT(*) FROM reflection_wall_actors ra WHERE ra.activity_id = a.id)
+      SELECT a.*, CASE WHEN a.tool_id = 'quiz'
+          THEN (SELECT COUNT(*) FROM quiz_run_participants qp JOIN quiz_runs qr ON qr.id=qp.run_id WHERE qr.activity_id=a.id)
           ELSE (SELECT COUNT(*) FROM participants p WHERE p.activity_id = a.id) END AS participant_count,
         CASE WHEN a.tool_id = 'poll'
           THEN (SELECT COUNT(*) FROM poll_participations pp WHERE pp.activity_id = a.id AND pp.has_submitted = 1)
@@ -268,8 +285,42 @@ async function ownerRoute(request: Request, env: Env, url: URL): Promise<Respons
           THEN (SELECT COUNT(*) FROM scarf_participations sp WHERE sp.activity_id = a.id AND sp.status = 'submitted')
           WHEN a.tool_id = 'learning-behaviors-reflection'
           THEN (SELECT COUNT(*) FROM lbr_progress lp WHERE lp.activity_id = a.id AND lp.self_locked_at IS NOT NULL)
+          WHEN a.tool_id = 'quiz'
+          THEN (SELECT COUNT(*) FROM quiz_run_participants qp JOIN quiz_runs qr ON qr.id=qp.run_id LEFT JOIN quiz_attempts qa ON qa.run_id=qp.run_id AND qa.participant_id=qp.id WHERE qr.activity_id=a.id AND (qa.state IN ('SUBMITTED','AUTO_SUBMITTED') OR (qr.run_type='LIVE' AND EXISTS (SELECT 1 FROM quiz_live_answers qla WHERE qla.run_id=qr.id AND qla.participant_id=qp.id))))
           ELSE (SELECT COUNT(*) FROM submissions sub WHERE sub.activity_id = a.id AND sub.status = 'submitted') END AS submitted_count
-      FROM activities a LEFT JOIN sessions s ON s.id = a.session_id ORDER BY a.updated_at DESC
+      FROM activities a WHERE a.session_id = ? AND a.deleted_at IS NULL ORDER BY a.created_at
+    `).bind(sessionId).all();
+    const { results: teams } = await db.prepare(`
+      SELECT t.id, t.name, t.activity_id, a.title AS activity_title, COUNT(p.id) AS participant_count
+      FROM teams t JOIN activities a ON a.id = t.activity_id
+      LEFT JOIN participants p ON p.team_id = t.id AND p.activity_id = t.activity_id
+      WHERE a.session_id = ? AND a.deleted_at IS NULL GROUP BY t.id, t.name, t.activity_id, a.title ORDER BY t.created_at
+    `).bind(sessionId).all();
+    return json({ session, activities, teams });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/owner/activities") {
+    const { results } = await db.prepare(`
+      SELECT a.*, s.name AS session_name,
+        CASE WHEN a.tool_id = 'reflection-wall'
+          THEN (SELECT COUNT(*) FROM reflection_wall_actors ra WHERE ra.activity_id = a.id)
+          WHEN a.tool_id = 'quiz'
+          THEN (SELECT COUNT(*) FROM quiz_run_participants qp JOIN quiz_runs qr ON qr.id=qp.run_id WHERE qr.activity_id=a.id)
+          ELSE (SELECT COUNT(*) FROM participants p WHERE p.activity_id = a.id) END AS participant_count,
+        CASE WHEN a.tool_id = 'poll'
+          THEN (SELECT COUNT(*) FROM poll_participations pp WHERE pp.activity_id = a.id AND pp.has_submitted = 1)
+          WHEN a.tool_id = 'wordcloud'
+          THEN (SELECT COUNT(*) FROM wordcloud_anonymous_submissions wc WHERE wc.activity_id = a.id)
+          WHEN a.tool_id = 'reflection-wall'
+          THEN (SELECT COUNT(*) FROM reflection_wall_posts rw WHERE rw.activity_id = a.id)
+          WHEN a.tool_id = 'scarf-assessment'
+          THEN (SELECT COUNT(*) FROM scarf_participations sp WHERE sp.activity_id = a.id AND sp.status = 'submitted')
+          WHEN a.tool_id = 'learning-behaviors-reflection'
+          THEN (SELECT COUNT(*) FROM lbr_progress lp WHERE lp.activity_id = a.id AND lp.self_locked_at IS NOT NULL)
+          WHEN a.tool_id = 'quiz'
+          THEN (SELECT COUNT(*) FROM quiz_run_participants qp JOIN quiz_runs qr ON qr.id=qp.run_id LEFT JOIN quiz_attempts qa ON qa.run_id=qp.run_id AND qa.participant_id=qp.id WHERE qr.activity_id=a.id AND (qa.state IN ('SUBMITTED','AUTO_SUBMITTED') OR (qr.run_type='LIVE' AND EXISTS (SELECT 1 FROM quiz_live_answers qla WHERE qla.run_id=qr.id AND qla.participant_id=qp.id))))
+          ELSE (SELECT COUNT(*) FROM submissions sub WHERE sub.activity_id = a.id AND sub.status = 'submitted') END AS submitted_count
+      FROM activities a LEFT JOIN sessions s ON s.id = a.session_id WHERE a.deleted_at IS NULL ORDER BY a.updated_at DESC
     `).all();
     return json({ activities: results });
   }
@@ -277,7 +328,7 @@ async function ownerRoute(request: Request, env: Env, url: URL): Promise<Respons
   if (request.method === "POST" && url.pathname === "/api/owner/activities") {
     const data = await readBody(request, ActivityInput);
     if (!data) return fail("Check the activity details and try again.", 400);
-    if (data.sessionId && !await db.prepare("SELECT id FROM sessions WHERE id = ?").bind(data.sessionId).first()) {
+    if (data.sessionId && !await db.prepare("SELECT id FROM sessions WHERE id = ? AND deleted_at IS NULL").bind(data.sessionId).first()) {
       return fail("Session not found.", 404);
     }
     if (!data.allowTeams && data.teamNames.length) return fail("Teams are disabled for this activity.", 400);
@@ -352,16 +403,28 @@ async function ownerRoute(request: Request, env: Env, url: URL): Promise<Respons
         pin = "";
       }
       if (!pin) return fail("Could not create a unique join code. Try again.", 503);
-      await db.prepare("UPDATE activities SET state = 'open', join_pin = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(pin, activityId).run();
+      const openStatements = [db.prepare("UPDATE activities SET state = 'open', join_pin = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(pin, activityId)];
+      if (activity.tool_id === "scarf-assessment") {
+        openStatements.push(db.prepare(`UPDATE presentation_state SET presenter_stage = 'lobby', presenter_view = 'individual', presenter_comparison = 'personal_pattern', revealed = 0, comparison_basis = 'within_person', updated_at = CURRENT_TIMESTAMP WHERE activity_id = ?`).bind(activityId));
+      }
+      await db.batch(openStatements);
+      await syncRunState(db, activityId);
       return json({ pin, joinPath: `/join?pin=${pin}`, state: "open" });
     }
     if (request.method === "POST" && ["pause", "close"].includes(action ?? "")) {
       const state = action === "pause" ? "paused" : "closed";
-      await db.prepare("UPDATE activities SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(state, activityId).run();
-      if (action === "close") await db.prepare("UPDATE scarf_presenter_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE activity_id = ? AND revoked_at IS NULL").bind(activityId).run();
+      const stateStatements = [db.prepare("UPDATE activities SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(state, activityId)];
+      if (activity.tool_id === "scarf-assessment" && action === "close") {
+        // The existing read-only Presenter tab stays alive and moves to the
+        // closed screen; the trainer can reveal it explicitly afterwards.
+        stateStatements.push(db.prepare(`UPDATE presentation_state SET presenter_stage = CASE WHEN presenter_stage = 'heatmap_revealed' THEN presenter_stage ELSE 'closed_waiting' END, revealed = CASE WHEN presenter_stage = 'heatmap_revealed' THEN revealed ELSE 0 END, updated_at = CURRENT_TIMESTAMP WHERE activity_id = ?`).bind(activityId));
+      }
+      await db.batch(stateStatements);
+      await syncRunState(db, activityId);
       return json({ state });
     }
     if (request.method === "POST" && action === "reveal") {
+      if (activity.tool_id === "scarf-assessment") return fail("Use the SCARF Control Room reveal action.", 409);
       const data = await readBody(request, PresenterStateInput);
       if (!data) return fail("Invalid presenter settings.", 400);
       if (data.selectedTeamId) {
@@ -447,6 +510,24 @@ async function guestRoute(request: Request, env: Env, url: URL): Promise<Respons
   const db = database(env);
   if (!db) return fail("D1 database is not configured.", 503);
 
+  const stableActivityMatch = url.pathname.match(/^\/api\/join\/activities\/([a-f\d]{32})$/i);
+  if (request.method === "GET" && stableActivityMatch) {
+    if (!await rateLimitRequest(request, env, "lookup")) return fail("Too many attempts. Wait a few minutes and try again.", 429);
+    const access = await db.prepare(`SELECT a.id,a.tool_id,a.join_pin,p.access_slug AS poll_slug,
+        w.access_slug AS wall_slug,w.access_enabled
+      FROM activities a LEFT JOIN poll_configs p ON p.activity_id=a.id
+      LEFT JOIN reflection_wall_configs w ON w.activity_id=a.id
+      WHERE a.access_slug=? AND a.deleted_at IS NULL`).bind(stableActivityMatch[1]).first<{
+        id:string;tool_id:string;join_pin:string|null;poll_slug:string|null;wall_slug:string|null;access_enabled:number|null;
+      }>();
+    if (!access) return fail("This Activity link is unavailable.", 404);
+    if (access.tool_id === "quiz") return json({ path: `/quiz/join/${access.id}` });
+    if (access.tool_id === "poll" && access.poll_slug) return json({ path: `/poll/${access.poll_slug}` });
+    if (access.tool_id === "reflection-wall" && access.wall_slug && access.access_enabled) return json({ path: `/reflection/${access.wall_slug}` });
+    if (!access.join_pin) return fail("This Activity is not accepting participant access right now.", 409);
+    return json({ path: `/join?pin=${access.join_pin}` });
+  }
+
   if (request.method === "POST" && url.pathname === "/api/join/lookup") {
     if (!await rateLimitRequest(request, env, "lookup")) return fail("Too many attempts. Wait a few minutes and try again.", 429);
     const data = await readBody(request, JoinLookupInput);
@@ -456,10 +537,10 @@ async function guestRoute(request: Request, env: Env, url: URL): Promise<Respons
         wc.phase AS wordcloud_phase, wc.access_slug AS wordcloud_slug
       FROM activities a LEFT JOIN sessions s ON s.id = a.session_id
       LEFT JOIN scarf_activity_configs cfg ON cfg.activity_id = a.id
-      LEFT JOIN wordcloud_configs wc ON wc.activity_id = a.id WHERE a.join_pin = ?
+      LEFT JOIN wordcloud_configs wc ON wc.activity_id = a.id WHERE a.join_pin = ? AND a.deleted_at IS NULL
     `).bind(data.pin).first<{ id: string; title: string; state: string; tool_id: string; session_id: string | null; allow_teams: number; require_name: number; session_name: string | null; release_mode: string | null; wordcloud_phase: string | null; wordcloud_slug: string | null }>();
     if (!activity) {
-      const session = await db.prepare(`SELECT s.name, a.access_slug FROM poll_session_access a JOIN sessions s ON s.id = a.session_id WHERE a.join_pin = ?`)
+      const session = await db.prepare(`SELECT s.name, a.access_slug FROM poll_session_access a JOIN sessions s ON s.id = a.session_id WHERE a.join_pin = ? AND s.status!='completed' AND s.deleted_at IS NULL`)
         .bind(data.pin).first<{ name: string; access_slug: string }>();
       if (session) return json({ session: { name: session.name, accessSlug: session.access_slug } });
       return fail("That code is not available. Check it with your trainer.", 404);
@@ -471,6 +552,7 @@ async function guestRoute(request: Request, env: Env, url: URL): Promise<Respons
         requireName: wall.identity_mode === "named", accessSlug: wall.access_slug, phase: wall.phase,
         readOnly: ["CLOSED", "ARCHIVED"].includes(wall.phase) || wall.session_status === "completed" }, teams: [] });
     }
+    if (activity.tool_id === "quiz") return json({ activity: { id: activity.id, title: activity.title, toolId: "quiz", requireName: true }, teams: [] });
     const wordCloudJoinable = activity.tool_id === "wordcloud" && ["READY", "OPEN", "CLOSED", "ARCHIVED"].includes(activity.wordcloud_phase ?? "");
     if (!wordCloudJoinable && activity.state !== "open") return fail("That code is not available. Check it with your trainer.", 404);
     const teams: Array<{ id: string; name: string }> = activity.allow_teams
@@ -499,11 +581,12 @@ async function guestRoute(request: Request, env: Env, url: URL): Promise<Respons
     if (!await rateLimitRequest(request, env, "enter")) return fail("Too many join attempts. Wait a few minutes and try again.", 429);
     const data = await readBody(request, JoinEnterInput);
     if (!data) return fail("Enter a display name to continue.", 400);
-    const activity = await db.prepare(`SELECT a.id, a.state, a.tool_id, a.session_id, a.allow_teams, a.require_name, wc.phase AS wordcloud_phase
-      FROM activities a LEFT JOIN wordcloud_configs wc ON wc.activity_id = a.id WHERE a.join_pin = ?`)
-      .bind(data.pin).first<{ id: string; state: string; tool_id: string; session_id: string | null; allow_teams: number; require_name: number; wordcloud_phase: string | null }>();
+    const activity = await db.prepare(`SELECT a.id, a.state, a.tool_id, a.session_id, a.allow_teams, a.require_name, s.status AS session_status, wc.phase AS wordcloud_phase
+      FROM activities a LEFT JOIN sessions s ON s.id=a.session_id LEFT JOIN wordcloud_configs wc ON wc.activity_id = a.id WHERE a.join_pin = ? AND a.deleted_at IS NULL`)
+      .bind(data.pin).first<{ id: string; state: string; tool_id: string; session_id: string | null; session_status: string | null; allow_teams: number; require_name: number; wordcloud_phase: string | null }>();
     const wordCloudJoinable = activity?.tool_id === "wordcloud" && ["READY", "OPEN", "CLOSED", "ARCHIVED"].includes(activity.wordcloud_phase ?? "");
     if (!activity || (!wordCloudJoinable && activity.state !== "open")) return fail("This activity is not available.", 404);
+    if (activity.tool_id === "quiz") return fail("Open the Quiz join screen for this Activity.", 400);
     if (activity.tool_id === "reflection-wall") return fail("Open the Reflection Wall link to join this activity.", 400);
     if (activity.allow_teams && data.teamId && !await db.prepare("SELECT id FROM teams WHERE id = ? AND activity_id = ?").bind(data.teamId, activity.id).first()) {
       return fail("Choose a team from this activity.", 400);
@@ -512,7 +595,7 @@ async function guestRoute(request: Request, env: Env, url: URL): Promise<Respons
     if (activity.require_name && !data.displayName.trim()) return fail("Enter your name to continue.", 400);
     const token = randomToken();
     let sessionIdentityId: string | null = null;
-    if (activity.session_id && data.sessionToken) {
+    if (activity.session_id && activity.session_status !== "completed" && data.sessionToken) {
       const tokenHash = await sha256(data.sessionToken);
       let identity = await db.prepare("SELECT id FROM session_participant_identities WHERE session_id = ? AND token_hash = ?")
         .bind(activity.session_id, tokenHash).first<{ id: string }>();
@@ -733,13 +816,18 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       if (request.method !== "GET" && !isSameOrigin(request)) return fail("Request origin could not be verified.", 403);
       return ownerRoute(request, env, url);
     }
+    if (url.pathname.startsWith("/api/quiz/")) {
+      if (request.method !== "GET" && !isSameOrigin(request)) return fail("Request origin could not be verified.", 403);
+      return await quizPublicRoute(request, env, url) ?? fail("Quiz route not found.", 404);
+    }
     if (url.pathname === "/api/presenter") return presenterRoute(request, env);
     if (url.pathname.startsWith("/api/guest/") || url.pathname.startsWith("/api/join/")) {
       if (request.method !== "GET" && !isSameOrigin(request)) return fail("Request origin could not be verified.", 403);
       return guestRoute(request, env, url);
     }
     return fail("API route not found.", 404);
-  } catch {
+  } catch (error) {
+    console.error("API request failed", url.pathname, error instanceof Error ? error.name : "Unknown error");
     return fail("The request could not be completed. Try again.", 500);
   }
 }
@@ -747,5 +835,8 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 export default {
   fetch(request: Request, env: Env): Promise<Response> {
     return handleRequest(request, env);
+  },
+  scheduled(_controller: ScheduledController, env: Env, context: ExecutionContext): void {
+    if (env.DB) context.waitUntil(gdmPurgeExpired(env.DB));
   },
 } satisfies ExportedHandler<Env>;

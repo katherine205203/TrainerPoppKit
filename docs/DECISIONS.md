@@ -26,25 +26,25 @@
 
 ## SCARF Assessment decisions
 
-SC-D1–SC-D6 were locked by the supplied Implementation Pack v1.1. The v1.2 Product Pack scoring addendum replaces only the result/scoring/heatmap decisions; all other locked decisions still apply.
+SC-D1–SC-D6 were locked by the supplied Implementation Pack v1.1. The v1.2 scoring addendum and approved v1.3 Control Room & Presenter update replace the older presenter/privacy lifecycle decisions; all other locked decisions still apply.
 
 | ID | Status | Decision |
 |---|---|---|
 | SC-D1 | LOCKED | This release contains SCARF Assessment, personal results, trainer analytics and heatmaps. It does not add separate check-in, reflection or team-heatmap activities. |
 | SC-D2 | LOCKED | Activities may be standalone (`session_id = null`) or linked to an existing session. |
 | SC-D3 | LOCKED | At creation the trainer must choose `immediate` or `trainer_released`; do not default silently. Freeze the choice when the activity opens or its first participant joins. |
-| SC-D4 | LOCKED | The trainer/owner can inspect named individual results. Presenter access is aggregate-only and must never receive participant rows or identifiers. |
+| SC-D4 | LOCKED | The trainer/owner can inspect named individual results. SCARF is always named: the Presenter may receive named lobby status and named heatmap rows only after the trainer explicitly reveals the heatmap; it never receives raw answer records or owner controls. |
 | SC-D5 | LOCKED | Support activity, session and team analytics. Session analysis uses the latest compatible submission per session participant and reports excluded incompatible versions. |
 | SC-D6 | LOCKED | A participant has one current submission per activity and cannot self-retake. A trainer can explicitly reset the current attempt; reset increments its generation and is audited. |
 | SC-D7 | LOCKED | Keep the 30-item bank and its three response sections. Preserve Reaction Intensity and Driver Priority; add Integrated SCARF Needs Profile as a separate derived result and heatmap source. Do not silently rescore historical records. |
 | SC-D8 | LOCKED | Use v1.1 section-wise descending midranks (ties within 1e-9), `H=(5-rank)/4`, and `NeedsIndex=1+9×mean(H_R,H_B,H_T)`; rank the final five NeedsIndex values with midranks. Compare the same domain against participant-weighted class means. |
-| SC-D9 | LOCKED | Presenter aggregates require at least five compatible, released participants. If any team has fewer than five, suppress the whole team breakdown and complementary values while retaining the safe overall result when its cohort is at least five. |
+| SC-D9 | LOCKED | A SCARF Presenter Individual heatmap is revealable with one or more compatible submitted participants. Compared to Class requires at least two compatible profiles. Team view requires configured teams with at least two usable teams; there is no arbitrary minimum-five suppression. |
 
 ## SCARF implementation boundaries and remaining approvals
 
 - The supplied English 30-item Question Bank v0.2 and v1.1 scoring are implemented as an **experimental, unvalidated** instrument. The pack does not make it an official NLI questionnaire and the app must not claim validation, norms, diagnosis or competence measurement.
 - v1.1 retains the original fixed-sum Driver Priority and adds a third Integrated Needs Profile. New activities are pinned to scoring `1.1.0`; earlier records retain their stored versions and do not receive fabricated needs fields.
-- Presenter cohorts require at least five distinct submitted participants. When a small team could be inferred by subtraction, team drilldowns are suppressed. Trainer analytics remain named and private behind owner authentication.
+- v1.3 Presenter state is explicit and independent from personal-result release: Open/Present shows a live named lobby, Close shows an Activity Closed screen, and only an explicit Reveal heatmap action exposes named Needs rows. Individual reveal is allowed at n=1; class comparison and Team view have their own meaningful-data guards. Trainer analytics remain named and private behind owner authentication.
 - Participant-facing content is English in this release. Vietnamese localization is deferred.
 - The global owner sign-in implementation and existing QR/link/PIN contract are implemented in the app; production secrets still require deployment setup.
 

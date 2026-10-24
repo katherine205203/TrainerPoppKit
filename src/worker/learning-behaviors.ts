@@ -66,10 +66,10 @@ function normalizeBehaviorCopy(input?: z.infer<typeof behaviorListSchema>): LbrB
 
 async function getLbrActivity(db: D1Database, activityId: string) {
   return db.prepare(`SELECT a.id, a.session_id, a.title, a.tool_id, a.state, a.require_name, a.allow_teams,
-    a.join_pin, a.presenter_token_hash, s.name AS session_name, cfg.intro, cfg.behaviors_json, cfg.content_frozen_at, cfg.revision
+    a.join_pin, a.access_slug, a.presenter_token_hash, s.name AS session_name, cfg.intro, cfg.behaviors_json, cfg.content_frozen_at, cfg.revision
     FROM activities a JOIN lbr_activity_configs cfg ON cfg.activity_id = a.id
-    LEFT JOIN sessions s ON s.id = a.session_id WHERE a.id = ? AND a.tool_id = ?`).bind(activityId, LBR_TOOL_ID)
-    .first<{ id: string; session_id: string | null; title: string; tool_id: string; state: string; require_name: number; allow_teams: number; join_pin: string | null; presenter_token_hash: string | null; session_name: string | null; intro: string; behaviors_json: string; content_frozen_at: string | null; revision: number }>();
+    LEFT JOIN sessions s ON s.id = a.session_id WHERE a.id = ? AND a.tool_id = ? AND a.deleted_at IS NULL`).bind(activityId, LBR_TOOL_ID)
+    .first<{ id: string; session_id: string | null; title: string; tool_id: string; state: string; require_name: number; allow_teams: number; join_pin: string | null; access_slug: string; presenter_token_hash: string | null; session_name: string | null; intro: string; behaviors_json: string; content_frozen_at: string | null; revision: number }>();
 }
 
 async function defaultActivityPayload(db: D1Database, activityId: string) {
@@ -77,7 +77,7 @@ async function defaultActivityPayload(db: D1Database, activityId: string) {
   if (!activity) return null;
   const behaviors = JSON.parse(activity.behaviors_json) as LbrBehaviorCopy[];
   const teams = await db.prepare("SELECT id, name FROM teams WHERE activity_id = ? ORDER BY created_at").bind(activityId).all<{ id: string; name: string }>();
-  return { activity: { id: activity.id, sessionId: activity.session_id, sessionName: activity.session_name, title: activity.title, state: activity.state, joinPin: activity.join_pin, allowTeams: Boolean(activity.allow_teams), contentFrozen: Boolean(activity.content_frozen_at), contentFrozenAt: activity.content_frozen_at }, intro: activity.intro, behaviors, teams: teams.results };
+  return { activity: { id: activity.id, sessionId: activity.session_id, sessionName: activity.session_name, title: activity.title, state: activity.state, joinPin: activity.join_pin, accessSlug: activity.access_slug, allowTeams: Boolean(activity.allow_teams), contentFrozen: Boolean(activity.content_frozen_at), contentFrozenAt: activity.content_frozen_at }, intro: activity.intro, behaviors, teams: teams.results };
 }
 
 async function ensureProgress(db: D1Database, activityId: string, participantId: string) {
@@ -127,7 +127,7 @@ async function ownState(db: D1Database, participant: LearningBehaviorsParticipan
 }
 
 async function participantIsOpen(db: D1Database, activityId: string) {
-  return Boolean(await db.prepare("SELECT id FROM activities WHERE id = ? AND tool_id = ? AND state = 'open'").bind(activityId, LBR_TOOL_ID).first());
+  return Boolean(await db.prepare("SELECT id FROM activities WHERE id = ? AND tool_id = ? AND state = 'open' AND deleted_at IS NULL").bind(activityId, LBR_TOOL_ID).first());
 }
 
 async function ownerList(db: D1Database) {
@@ -136,7 +136,7 @@ async function ownerList(db: D1Database) {
     (SELECT COUNT(*) FROM lbr_progress p WHERE p.activity_id = a.id AND p.self_locked_at IS NOT NULL) AS self_locked_count,
     (SELECT COUNT(*) FROM lbr_peer_rounds r WHERE r.activity_id = a.id AND r.status = 'SUBMITTED') AS peer_submission_count
     FROM activities a JOIN lbr_activity_configs cfg ON cfg.activity_id = a.id
-    LEFT JOIN sessions s ON s.id = a.session_id ORDER BY a.updated_at DESC`).all();
+    LEFT JOIN sessions s ON s.id = a.session_id WHERE a.deleted_at IS NULL ORDER BY a.updated_at DESC`).all();
   return { activities: results };
 }
 
@@ -540,7 +540,7 @@ export async function learningBehaviorsPresenterRoute(request: Request, env: Lea
   const db = dbFor(env);
   if (!db) return fail("D1 database is not configured.", 503);
   const tokenHash = await sha256(token);
-  const activity = await db.prepare("SELECT id,title,state FROM activities WHERE presenter_token_hash = ? AND tool_id = ?")
+  const activity = await db.prepare("SELECT id,title,state FROM activities WHERE presenter_token_hash = ? AND tool_id = ? AND deleted_at IS NULL")
     .bind(tokenHash, LBR_TOOL_ID).first<{ id: string; title: string; state: string }>();
   if (!activity) return null;
   const stats = summarizeGroupSelf((await db.prepare(`SELECT p.participant_id,a.behavior_key,a.rating,a.is_na FROM lbr_progress p

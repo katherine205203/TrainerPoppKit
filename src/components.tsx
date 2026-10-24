@@ -48,7 +48,7 @@ export function Button({ children, variant = "primary", to, onClick, type = "but
   return <button className={classes} type={type} onClick={onClick} disabled={disabled}>{content}</button>;
 }
 
-export function Badge({ children, tone = "purple" }: { children: ReactNode; tone?: "purple" | "orange" | "blue" | "green" | "pink" | "gray" | "yellow" | "aqua" }) {
+export function Badge({ children, tone = "purple" }: { children?: ReactNode; tone?: "purple" | "orange" | "blue" | "green" | "pink" | "gray" | "yellow" | "aqua" }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 

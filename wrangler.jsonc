@@ -4,6 +4,7 @@
   "main": "./src/worker/index.ts",
   "compatibility_date": "2026-10-19",
   "upload_source_maps": true,
+  "triggers": { "crons": ["17 3 * * *"] },
   "secrets": {
     "required": ["OWNER_PASSWORD", "SESSION_SECRET"]
   },

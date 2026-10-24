@@ -1,6 +1,7 @@
 export type PollQuestionType = "single" | "multiple";
 export type PollIdentityMode = "anonymous" | "named";
 export type PollResultsMode = "presenter_only" | "presenter_and_participant";
+export type PollPresentationMode = "live_results" | "close_reveal";
 
 export type PollConfigInput = {
   title: string;
@@ -11,6 +12,7 @@ export type PollConfigInput = {
   allowOther: boolean;
   identityMode: PollIdentityMode;
   participantResultsMode: PollResultsMode;
+  presentationMode?: PollPresentationMode;
 };
 
 export type PollOption = { id: string; label: string; sortOrder: number; isOther: boolean };

@@ -190,20 +190,30 @@ assert(scarfAnalytics.data.submitted[0].displayName.startsWith("SCARF Guest") &&
 const scarfPresenterTokenResult = await call(`/owner/activities/${scarfActivityId}/presenter-token`, { method: "POST", cookie, body: {} });
 const scarfPresenterToken = scarfPresenterTokenResult.data.path.split("#")[1];
 const hiddenScarfPresenter = await call("/presenter", { token: scarfPresenterToken });
-assert(hiddenScarfPresenter.response.ok && hiddenScarfPresenter.data.kind === "scarf-aggregate" && hiddenScarfPresenter.data.revealed === false, "SCARF presenter remains blank before trainer release and reveal");
+assert(hiddenScarfPresenter.response.ok && hiddenScarfPresenter.data.kind === "scarf-control" && hiddenScarfPresenter.data.stage === "lobby" && hiddenScarfPresenter.data.participants.length === 5, "SCARF Presenter opens in a live named join lobby");
 const releaseScarf = await call(`/owner/scarf/activities/${scarfActivityId}/release`, { method: "POST", cookie, body: {} });
 assert(releaseScarf.response.ok && releaseScarf.data.released, "trainer releases personal results for the activity");
 const privateScarfResult = await call("/guest/scarf/results", { token: scarfToken });
 assert(privateScarfResult.response.ok && privateScarfResult.data.visible && privateScarfResult.data.reaction && privateScarfResult.data.priority && privateScarfResult.data.integratedNeedsIndex && privateScarfResult.data.integratedNeedsRank, "participant receives their integrated profile plus the two preserved measures after release");
-const revealedScarf = await call(`/owner/activities/${scarfActivityId}/reveal`, { method: "POST", cookie, body: { revealed: true, scarfLayer: "priority", selectedTeamId: null } });
-assert(revealedScarf.response.ok, "trainer configures the aggregate presenter layer");
+const independentPresenter = await call("/presenter", { token: scarfPresenterToken });
+assert(independentPresenter.response.ok && independentPresenter.data.stage === "lobby" && !independentPresenter.data.heatmap, "personal result release does not advance the Presenter");
+const lateScarfJoin = await call("/join/enter", { method: "POST", body: { pin: scarfPin, displayName: "SCARF Pending", teamId: scarfLookup.data.teams[0].id }, ip: `scarf-pending-${smokeRun}` });
+assert([200, 201].includes(lateScarfJoin.response.status), "a joined but unfinished participant is visible before close");
+const closedScarf = await call(`/owner/activities/${scarfActivityId}/close`, { method: "POST", cookie, body: {} });
+assert(closedScarf.response.ok && closedScarf.data.state === "closed", "trainer closes SCARF responses without revoking the Presenter tab");
+const closedScarfPresenter = await call("/presenter", { token: scarfPresenterToken });
+assert(closedScarfPresenter.response.ok && closedScarfPresenter.data.stage === "closed_waiting" && !closedScarfPresenter.data.heatmap, "Presenter moves to the explicit Activity Closed screen");
+const lateScarfAnswer = await call("/guest/scarf/answers/Q01", { method: "PUT", token: lateScarfJoin.data.token, body: { generation: 1, revision: 1, answer: 5, currentQuestion: 1 } });
+assert(lateScarfAnswer.response.status === 409 && lateScarfAnswer.data.code === "ACTIVITY_NOT_OPEN", "closed SCARF activity rejects new answer changes");
+const revealedScarf = await call(`/owner/scarf/activities/${scarfActivityId}/presenter-state`, { method: "POST", cookie, body: { stage: "heatmap_revealed", view: "individual", comparison: "personal_pattern" } });
+assert(revealedScarf.response.ok && revealedScarf.data.stage === "heatmap_revealed", "trainer explicitly reveals the named Individual heatmap");
 const groupScarfPresenter = await call("/presenter", { token: scarfPresenterToken });
-assert(groupScarfPresenter.response.ok && groupScarfPresenter.data.heatmap.count === 5 && groupScarfPresenter.data.heatmap.classMean && groupScarfPresenter.data.heatmap.teamBreakdownSuppressed, "presenter receives the safe aggregate profile while suppressing the four-person team breakdown");
-assert(!Object.hasOwn(groupScarfPresenter.data, "rows") && !JSON.stringify(groupScarfPresenter.data).includes("SCARF Guest") && !JSON.stringify(groupScarfPresenter.data).includes(scarfJoiners[0].participant.id), "presenter payload contains no participant rows, identifiers, or names");
-const selectedSmallGroup = await call(`/owner/activities/${scarfActivityId}/reveal`, { method: "POST", cookie, body: { revealed: true, scarfLayer: "priority", selectedTeamId: scarfLookup.data.teams[0].id } });
-assert(selectedSmallGroup.response.ok, "trainer selects a team for aggregate presenter view");
-const suppressedScarfPresenter = await call("/presenter", { token: scarfPresenterToken });
-assert(suppressedScarfPresenter.response.ok && suppressedScarfPresenter.data.heatmap.count === 5 && suppressedScarfPresenter.data.heatmap.teams.length === 0 && suppressedScarfPresenter.data.heatmap.teamBreakdownSuppressed, "presenter retains the eligible whole-cohort aggregate and suppresses all teams when a team is under five");
+assert(groupScarfPresenter.response.ok && groupScarfPresenter.data.kind === "scarf-control" && groupScarfPresenter.data.view === "individual" && groupScarfPresenter.data.heatmap.participants.length === 5 && groupScarfPresenter.data.heatmap.participants.some((person) => person.displayName === "SCARF Guest 1"), "Presenter reveals named Individual rows with one or more completed responses");
+assert(!JSON.stringify(groupScarfPresenter.data).includes('answer_json') && !JSON.stringify(groupScarfPresenter.data).includes('reaction_json'), "Presenter payload contains names and scores but never raw answer records");
+const teamPresenterState = await call(`/owner/scarf/activities/${scarfActivityId}/presenter-state`, { method: "POST", cookie, body: { stage: "heatmap_revealed", view: "team", comparison: "compared_to_class" } });
+assert(teamPresenterState.response.ok, "trainer can switch the revealed Presenter to the team/class view");
+const teamScarfPresenter = await call("/presenter", { token: scarfPresenterToken });
+assert(teamScarfPresenter.response.ok && teamScarfPresenter.data.view === "team" && teamScarfPresenter.data.heatmap.teams.length === 2, "Presenter follows Control Room team view without a manual refresh");
 const scarfSessionAnalytics = await call(`/owner/scarf/sessions/${sessionId}/analytics`, { cookie });
 assert(scarfSessionAnalytics.response.ok && scarfSessionAnalytics.data.scope === "session" && scarfSessionAnalytics.data.counts.joined >= 5, "trainer can review session-scoped SCARF analytics");
 const laterScarfActivity = await call("/owner/activities", { method: "POST", cookie, body: { sessionId, title: "SCARF latest response smoke", toolId: "scarf-assessment", releaseMode: "immediate", requireName: true, allowTeams: false, teamNames: [] } });
@@ -223,28 +233,24 @@ for (let index = 0; index < laterBank.length; index += 1) {
 const laterSubmission = await call("/guest/scarf/submit", { method: "POST", token: returningJoin.data.token, body: { generation: 1, idempotencyKey: crypto.randomUUID() } });
 assert(laterSubmission.response.ok, "returning participant completes a later activity in the same session");
 const dedupedSession = await call(`/owner/scarf/sessions/${sessionId}/analytics`, { cookie });
-assert(dedupedSession.response.ok && dedupedSession.data.counts.joined === 5 && dedupedSession.data.counts.completed === 5, `session analytics count the latest compatible submission once per participant identity (joined ${dedupedSession.data.counts.joined}, completed ${dedupedSession.data.counts.completed})`);
+assert(dedupedSession.response.ok && dedupedSession.data.counts.joined === 6 && dedupedSession.data.counts.completed === 5, `session analytics count the latest compatible submission once per participant identity (joined ${dedupedSession.data.counts.joined}, completed ${dedupedSession.data.counts.completed})`);
 const sessionCsv = await call(`/owner/scarf/sessions/${sessionId}/export.csv`, { cookie });
 assert(sessionCsv.response.ok && sessionCsv.response.headers.get("content-type")?.includes("text/csv") && sessionCsv.text.startsWith('"participant","team"'), "trainer can export session-scoped named scores as CSV");
 const sessionPresenterState = await call(`/owner/scarf/sessions/${sessionId}/presenter-state`, { method: "POST", cookie, body: { revealed: true, teamName: null, layer: "reaction" } });
 assert(sessionPresenterState.response.ok, "trainer can reveal the session-level aggregate presenter");
 const sessionPresenterToken = await call(`/owner/scarf/sessions/${sessionId}/presenter-session`, { method: "POST", cookie });
 const sessionPresenter = await call("/presenter", { token: sessionPresenterToken.data.path.split("#")[1] });
-assert(sessionPresenter.response.ok && sessionPresenter.data.heatmap.count === 5 && sessionPresenter.data.heatmap.classMean, "session presenter displays a version-compatible latest-response aggregate");
-assert(!Object.hasOwn(sessionPresenter.data, "rows") && !JSON.stringify(sessionPresenter.data).includes("SCARF Guest") && !JSON.stringify(sessionPresenter.data).includes(scarfJoiners[0].participant.id), "session presenter payload contains no names, identifiers, or response records");
-const smallSessionGroup = await call(`/owner/scarf/sessions/${sessionId}/presenter-state`, { method: "POST", cookie, body: { revealed: true, teamName: "Small group", layer: "priority" } });
-assert(smallSessionGroup.response.ok, "trainer can choose a session group for presentation");
-const hiddenSessionTeam = await call("/presenter", { token: sessionPresenterToken.data.path.split("#")[1] });
-assert(hiddenSessionTeam.response.ok && hiddenSessionTeam.data.heatmap.count === 5 && hiddenSessionTeam.data.heatmap.teams.length === 0 && hiddenSessionTeam.data.heatmap.teamBreakdownSuppressed, "session presenter suppresses small teams while retaining the eligible whole-cohort aggregate");
+assert(sessionPresenter.response.ok && sessionPresenter.data.kind === "scarf-control" && sessionPresenter.data.stage === "heatmap_revealed" && sessionPresenter.data.heatmap.classCount >= 5, "session Presenter displays a version-compatible latest-response heatmap");
+assert(!JSON.stringify(sessionPresenter.data).includes('answer_json') && JSON.stringify(sessionPresenter.data).includes("SCARF Guest"), "session Presenter can show named SCARF rows after explicit reveal without raw answers");
 const resetScarf = await call(`/owner/scarf/activities/${scarfActivityId}/participants/${scarfJoiners[0].participant.id}/reset`, { method: "POST", cookie, body: { reason: "Smoke test reset" } });
 assert(resetScarf.response.ok && resetScarf.data.generation === 2, "trainer reset clears the current generation and records a fresh attempt");
 const staleGeneration = await call("/guest/scarf/answers/Q01", { method: "PUT", token: scarfToken, body: { generation: 1, revision: 2, answer: 5, currentQuestion: 1 } });
 assert(staleGeneration.response.status === 409 && staleGeneration.data.code === "GENERATION_MISMATCH", "old participant links cannot write into a reset generation");
 
-// Poll v1.2: exercise the real Worker/D1 routes, Session identity reuse,
+// Poll v1.3: exercise the real Worker/D1 routes, Session identity reuse,
 // anonymous response separation, live vote updates and a 200-person cohort.
 const pollConfigs = [
-  { title: `Poll smoke ${smokeRun} A`, question: "What should we focus on?", questionType: "multiple", options: ["Clear priorities", "More focus time", "=Formula-safe label"], maxSelections: 2, allowOther: true, identityMode: "anonymous", participantResultsMode: "presenter_and_participant", sessionId },
+  { title: `Poll smoke ${smokeRun} A`, question: "What should we focus on?", questionType: "multiple", options: ["Clear priorities", "More focus time", "=Formula-safe label"], maxSelections: 2, allowOther: true, identityMode: "anonymous", participantResultsMode: "presenter_and_participant", presentationMode: "live_results", sessionId },
   { title: `Poll smoke ${smokeRun} B`, question: "What should we improve?", questionType: "single", options: ["Communication", "Planning"], maxSelections: 1, allowOther: false, identityMode: "anonymous", participantResultsMode: "presenter_only", sessionId },
   { title: `Poll smoke ${smokeRun} C`, question: "What would help most?", questionType: "single", options: ["More clarity", "More time"], maxSelections: 1, allowOther: false, identityMode: "anonymous", participantResultsMode: "presenter_only", sessionId },
 ];
@@ -259,6 +265,7 @@ for (const config of pollConfigs) {
   const openedPoll = await call(`/owner/polls/${created.data.activityId}/open`, { method: "POST", cookie, body: {} });
   assert(openedPoll.response.ok && /^\d{6}$/.test(openedPoll.data.pin), "trainer opens a Poll and receives its six-digit PIN");
   const detail = await call(`/owner/polls/${created.data.activityId}`, { cookie });
+  assert(detail.response.ok && detail.data.poll, `trainer reads the new Poll detail (${detail.response.status}: ${detail.data.error ?? "missing poll payload"})`);
   const publicPoll = await call(`/join/polls/${detail.data.poll.accessSlug}`);
   assert(publicPoll.response.ok && publicPoll.data.poll.sessionAccessSlug, "participant Poll link resolves with its shared Session entry link");
   const pollPinLookup = await call("/join/lookup", { method: "POST", body: { pin: openedPoll.data.pin }, ip: `poll-direct-pin-${pollRecords.length}-${smokeRun}` });
@@ -271,6 +278,8 @@ const sessionLookup = await call("/join/lookup", { method: "POST", body: { pin: 
 assert(sessionLookup.response.ok && sessionLookup.data.session.accessSlug === sessionAccess.data.path.split("/").at(-1), "six-digit Session PIN resolves to the Session Poll landing");
 const sessionLanding = await call(`/join/poll-sessions/${sessionLookup.data.session.accessSlug}`);
 assert(sessionLanding.response.ok && sessionLanding.data.polls.length === 3, "Session landing lists each currently Live Poll");
+const closeRevealGate = await call(`/owner/polls/${pollRecords[1].id}/reveal`, { method: "POST", cookie, body: { revealed: true } });
+assert(closeRevealGate.response.status === 409 && closeRevealGate.data.code === "MUST_CLOSE_BEFORE_REVEAL", "Close and Reveal Polls cannot reveal while voting is open");
 
 const pollParticipants = [];
 const loadParticipantCount = 200;
@@ -329,7 +338,7 @@ const shownPollResult = await call("/guest/poll/results", { token: pollZeroParti
 assert(shownPollResult.response.ok && shownPollResult.data.visible && shownPollResult.data.respondentCount === pollZeroParticipants.length, "participants receive aggregate results after Reveal when enabled");
 const presenterAccess = await call(`/owner/activities/${pollZero.id}/presenter-token`, { method: "POST", cookie, body: {} });
 const pollPresenter = await call("/presenter", { token: presenterAccess.data.path.split("#")[1] });
-assert(pollPresenter.response.ok && pollPresenter.data.kind === "poll" && pollPresenter.data.revealed, "Presenter Mode shows the revealed Poll aggregate");
+assert(pollPresenter.response.ok && pollPresenter.data.kind === "poll" && ["LIVE_RESULTS", "FINAL_RESULTS", "FROZEN_RESULTS"].includes(pollPresenter.data.displayState) && Array.isArray(pollPresenter.data.results), "Presenter Mode shows the revealed Poll aggregate");
 assert(!Object.hasOwn(pollPresenter.data, "rows") && !JSON.stringify(pollPresenter.data).includes("Poll Load"), "Presenter payload contains no participant names or response rows");
 const hideParticipantResults = await call(`/owner/polls/${pollZero.id}/reveal`, { method: "POST", cookie, body: { revealed: true, participantResultsMode: "presenter_only" } });
 const hiddenAgain = await call("/guest/poll/results", { token: pollZeroParticipants[0].token });
@@ -350,7 +359,7 @@ const duplicateDetail = await call(`/owner/polls/${duplicatedPoll.data.activityI
 assert(duplicatedPoll.response.status === 201 && duplicateDetail.data.poll.state === "draft" && duplicateDetail.data.counts.respondents === 0 && duplicateDetail.data.poll.joinPin === null, "duplicate creates a clean Draft without votes or a join PIN");
 const invalidPresenterMode = await call(`/owner/polls/${pollRecords[1].id}/reveal`, { method: "POST", cookie, body: { revealed: true, participantResultsMode: "everybody" } });
 assert(invalidPresenterMode.response.status === 400, "invalid participant visibility settings are rejected");
-const namedPollCreated = await call("/owner/polls", { method: "POST", cookie, body: { title: `Named Poll smoke ${smokeRun}`, question: "Which option should we pick?", questionType: "single", options: ["Option one", "Option two"], maxSelections: 1, allowOther: false, identityMode: "named", participantResultsMode: "presenter_only", sessionId: null } });
+const namedPollCreated = await call("/owner/polls", { method: "POST", cookie, body: { title: `Named Poll smoke ${smokeRun}`, question: "Which option should we pick?", questionType: "single", options: ["Option one", "Option two"], maxSelections: 1, allowOther: false, identityMode: "named", participantResultsMode: "presenter_only", presentationMode: "live_results", sessionId: null } });
 const namedPollId = namedPollCreated.data.activityId;
 await call(`/owner/polls/${namedPollId}/open`, { method: "POST", cookie, body: {} });
 const namedPollMeta = await call(`/owner/polls/${namedPollId}`, { cookie });
@@ -363,7 +372,7 @@ assert(namedPollCsv.response.ok && namedPollCsv.text.includes("Named Poll QA gue
 await call(`/owner/polls/${namedPollId}/reveal`, { method: "POST", cookie, body: { revealed: true } });
 const namedPresenterToken = await call(`/owner/activities/${namedPollId}/presenter-token`, { method: "POST", cookie, body: {} });
 const namedPresenterPayload = await call("/presenter", { token: namedPresenterToken.data.path.split("#")[1] });
-assert(namedPresenterPayload.response.ok && namedPresenterPayload.data.revealed && !JSON.stringify(namedPresenterPayload.data).includes("Named Poll QA guest"), "Named Poll Presenter still exposes aggregate results only");
+assert(namedPresenterPayload.response.ok && ["LIVE_RESULTS", "FINAL_RESULTS", "FROZEN_RESULTS"].includes(namedPresenterPayload.data.displayState) && !JSON.stringify(namedPresenterPayload.data).includes("Named Poll QA guest"), "Named Poll Presenter still exposes aggregate results only");
 await call(`/owner/polls/${namedPollId}`, { method: "DELETE", cookie });
 for (const pollRecord of pollRecords) await call(`/owner/polls/${pollRecord.id}`, { method: "DELETE", cookie });
 await call(`/owner/polls/${duplicatedPoll.data.activityId}`, { method: "DELETE", cookie });
@@ -371,21 +380,21 @@ const loadIdentityCleanup = await execFileAsync(process.execPath, ["node_modules
   `DELETE FROM session_participant_identities WHERE session_id = '${sessionId}' AND display_name GLOB 'Poll Load [0-9][0-9][0-9]' AND created_at >= datetime('now', '-15 minutes'); SELECT changes() AS deleted;`]);
 assert(loadIdentityCleanup.stdout.includes('"deleted": 200'), "local Poll load-test identity fixtures are removed after verification");
 
-// Word Cloud v1.0: native activity lifecycle, session/team context, anonymous
-// storage boundaries, participant flow, moderation, exports and Presenter.
+// Word Cloud v1.1: native activity lifecycle, session/team context, anonymous
+// word storage with named lobby participants, moderation, exports and Presenter.
 const cloudCreated = await call("/owner/wordclouds", { method: "POST", cookie, body: {
-  sessionId, title: `Word Cloud smoke ${smokeRun}`, prompt: "What helps this team thrive?", maxWords: 3, teamNames: [], saveAsDraft: true,
+  sessionId, title: `Word Cloud smoke ${smokeRun}`, prompt: "What helps this team thrive?", maxWords: 3, presentationMode: "CLOSE_AND_REVEAL", teamNames: [], saveAsDraft: true,
 } });
 assert(cloudCreated.response.status === 201 && cloudCreated.data.phase === "DRAFT", "trainer creates a Session-linked Word Cloud draft");
 const cloudId = cloudCreated.data.activityId;
 const cloudDraft = await call(`/owner/wordclouds/${cloudId}`, { cookie });
-assert(cloudDraft.response.ok && cloudDraft.data.wordCloud.phase === "DRAFT" && cloudDraft.data.wordCloud.visibility === "HIDDEN", "new Word Cloud starts hidden with an independent lifecycle");
+assert(cloudDraft.response.ok && cloudDraft.data.wordCloud.phase === "DRAFT" && cloudDraft.data.wordCloud.visibility === "HIDDEN" && cloudDraft.data.wordCloud.presentationMode === "CLOSE_AND_REVEAL", "new Word Cloud starts hidden with an independent lifecycle");
 const cloudEdited = await call(`/owner/wordclouds/${cloudId}`, { method: "PATCH", cookie, body: {
-  title: `Word Cloud smoke ${smokeRun}`, prompt: "What helps this team thrive?", maxWords: 3, sessionId, teamNames: [], expectedRevision: cloudDraft.data.wordCloud.revision,
+  title: `Word Cloud smoke ${smokeRun}`, prompt: "What helps this team thrive?", maxWords: 3, presentationMode: "CLOSE_AND_REVEAL", sessionId, teamNames: [], expectedRevision: cloudDraft.data.wordCloud.revision,
 } });
 assert(cloudEdited.response.ok, "trainer can edit the configuration before the first open");
 const staleCloudEdit = await call(`/owner/wordclouds/${cloudId}`, { method: "PATCH", cookie, body: {
-  title: `Stale Word Cloud ${smokeRun}`, prompt: "Stale", maxWords: 2, sessionId, teamNames: [], expectedRevision: cloudDraft.data.wordCloud.revision,
+  title: `Stale Word Cloud ${smokeRun}`, prompt: "Stale", maxWords: 2, presentationMode: "CLOSE_AND_REVEAL", sessionId, teamNames: [], expectedRevision: cloudDraft.data.wordCloud.revision,
 } });
 const editedCloud = await call(`/owner/wordclouds/${cloudId}`, { cookie });
 assert(staleCloudEdit.response.status === 409 && editedCloud.data.wordCloud.title === cloudDraft.data.wordCloud.title, "stale Word Cloud edits return a conflict without partially changing the activity");
@@ -394,12 +403,12 @@ assert(cloudPublished.response.ok && cloudPublished.data.wordCloud.phase === "RE
 let cloud = cloudPublished.data;
 const cloudPin = cloud.wordCloud.joinPin;
 const cloudLookup = await call("/join/lookup", { method: "POST", body: { pin: cloudPin, sessionToken: scarfSessionTokens[0] }, ip: `wordcloud-lookup-${smokeRun}` });
-assert(cloudLookup.response.ok && cloudLookup.data.activity.toolId === "wordcloud" && cloudLookup.data.preselectedTeamId, "Session join restores a participant’s existing team choice without requesting their name");
+assert(cloudLookup.response.ok && cloudLookup.data.activity.toolId === "wordcloud" && cloudLookup.data.preselectedTeamId, "Session join restores a participant’s existing team choice for the named Word Cloud lobby");
 assert(cloudLookup.data.teams.some((team) => team.id === cloudLookup.data.preselectedTeamId), "preselected Session team maps to this activity’s team snapshot");
-const cloudJoinA = await call("/join/enter", { method: "POST", body: { pin: cloudPin, displayName: "", teamId: cloudLookup.data.preselectedTeamId, sessionToken: scarfSessionTokens[0] }, ip: `wordcloud-join-a-${smokeRun}` });
-assert(cloudJoinA.response.status === 201 && cloudJoinA.data.token, "Word Cloud participants can join with no name");
-const cloudJoinB = await call("/join/enter", { method: "POST", body: { pin: cloudPin, displayName: "", teamId: cloudLookup.data.teams.find((team) => team.id !== cloudLookup.data.preselectedTeamId)?.id ?? null }, ip: `wordcloud-join-b-${smokeRun}` });
-assert(cloudJoinB.response.status === 201 && cloudJoinB.data.token, "second participant can join anonymously and select a team");
+const cloudJoinA = await call("/join/enter", { method: "POST", body: { pin: cloudPin, displayName: "Minh A", teamId: cloudLookup.data.preselectedTeamId, sessionToken: scarfSessionTokens[0] }, ip: `wordcloud-join-a-${smokeRun}` });
+assert(cloudJoinA.response.status === 201 && cloudJoinA.data.token, "Word Cloud participants join with a display name for the Presenter lobby");
+const cloudJoinB = await call("/join/enter", { method: "POST", body: { pin: cloudPin, displayName: "Minh B", teamId: cloudLookup.data.teams.find((team) => team.id !== cloudLookup.data.preselectedTeamId)?.id ?? null }, ip: `wordcloud-join-b-${smokeRun}` });
+assert(cloudJoinB.response.status === 201 && cloudJoinB.data.token, "second participant can join with a display name and select a team");
 let cloudState = await call("/guest/wordcloud/state", { token: cloudJoinA.data.token });
 assert(cloudState.response.ok && cloudState.data.state === "WAITING" && !JSON.stringify(cloudState.data).toLowerCase().includes("cloudtop"), "participants see Waiting without access to aggregate words");
 const blockedCloudSubmit = await call("/guest/wordcloud/submit", { method: "POST", token: cloudJoinA.data.token, body: { words: ["not open"], idempotencyKey: crypto.randomUUID() } });
@@ -412,12 +421,12 @@ const cloudWordsA = ["  Tin  tưởng ", "Hợp tác", "=SUM(A1)"];
 const concurrentCloudKey = crypto.randomUUID();
 const concurrentCloudSubmits = await Promise.all(Array.from({ length: 2 }, () => call("/guest/wordcloud/submit", { method: "POST", token: cloudJoinA.data.token, body: { words: cloudWordsA, idempotencyKey: concurrentCloudKey }, ip: `wordcloud-submit-a-${smokeRun}` })));
 assert(concurrentCloudSubmits.every((result) => result.response.ok) && concurrentCloudSubmits.some((result) => result.data.status === "SUBMITTED") && concurrentCloudSubmits.some((result) => result.data.status === "ALREADY_SUBMITTED"), "two concurrent retries from one access submit at most once");
-const cloudJoinC = await call("/join/enter", { method: "POST", body: { pin: cloudPin, displayName: "", teamId: null }, ip: `wordcloud-join-c-${smokeRun}` });
-assert(cloudJoinC.response.status === 201, "third anonymous participant can join the open Word Cloud");
+const cloudJoinC = await call("/join/enter", { method: "POST", body: { pin: cloudPin, displayName: "Minh C", teamId: null }, ip: `wordcloud-join-c-${smokeRun}` });
+assert(cloudJoinC.response.status === 201, "third participant can join the open Word Cloud lobby");
 const cloudSubmitB = await call("/guest/wordcloud/submit", { method: "POST", token: cloudJoinB.data.token, body: { words: ["TIN TƯỞNG", "tin cậy"], idempotencyKey: crypto.randomUUID() }, ip: `wordcloud-submit-b-${smokeRun}` });
 const cloudSubmitC = await call("/guest/wordcloud/submit", { method: "POST", token: cloudJoinC.data.token, body: { words: ["Celebration"], idempotencyKey: crypto.randomUUID() }, ip: `wordcloud-submit-c-${smokeRun}` });
 assert(cloudSubmitB.response.ok && cloudSubmitB.data.status === "SUBMITTED" && cloudSubmitC.response.ok, "participant submissions are accepted atomically");
-const cloudJoinD = await call("/join/enter", { method: "POST", body: { pin: cloudPin, displayName: "", teamId: null }, ip: `wordcloud-join-d-${smokeRun}` });
+const cloudJoinD = await call("/join/enter", { method: "POST", body: { pin: cloudPin, displayName: "Minh D", teamId: null }, ip: `wordcloud-join-d-${smokeRun}` });
 assert(cloudJoinD.response.status === 201, "an additional participant can wait while intake is still open");
 const cloudOwner = await call(`/owner/wordclouds/${cloudId}`, { cookie });
 assert(cloudOwner.response.ok && cloudOwner.data.counts.submitted === 3 && !Object.hasOwn(cloudOwner.data, "participants") && !JSON.stringify(cloudOwner.data).includes("Guest "), "trainer analytics return aggregate totals without participant names or rows");
@@ -445,23 +454,25 @@ assert(cloudUnmerge.response.ok && cloudUnmerge.data.aggregate.hiddenTerms.lengt
 cloud = cloudUnmerge.data;
 const cloudPresenterToken = await call(`/owner/activities/${cloudId}/presenter-token`, { method: "POST", cookie, body: {} });
 const hiddenCloudPresenter = await call("/presenter", { token: cloudPresenterToken.data.path.split("#")[1] });
-assert(hiddenCloudPresenter.response.ok && hiddenCloudPresenter.data.kind === "wordcloud" && !Object.hasOwn(hiddenCloudPresenter.data, "cloudTop50"), "hidden Word Cloud Presenter receives no aggregate cloud payload");
-const cloudReveal = await call(`/owner/wordclouds/${cloudId}/transition`, { method: "POST", cookie, body: { action: "LIVE_REVEAL", expectedRevision: cloud.wordCloud.revision } });
-assert(cloudReveal.response.ok, "trainer can reveal Presenter independently of the open/closed lifecycle");
-cloud = cloudReveal.data;
-const visibleCloudPresenter = await call("/presenter", { token: cloudPresenterToken.data.path.split("#")[1] });
-assert(visibleCloudPresenter.response.ok && visibleCloudPresenter.data.cloudTop50 && !JSON.stringify(visibleCloudPresenter.data).includes("Guest "), "revealed Presenter receives aggregate-only words and no participant identities");
-const cloudCsv = await call(`/owner/wordclouds/${cloudId}/export?format=csv`, { cookie });
-assert(cloudCsv.response.ok && cloudCsv.bytes[0] === 0xef && cloudCsv.text.includes("'=SUM(A1)") && !cloudCsv.text.includes("Guest "), "CSV export is aggregate-only, UTF-8 BOM encoded and formula-safe");
+assert(hiddenCloudPresenter.response.ok && hiddenCloudPresenter.data.kind === "wordcloud" && hiddenCloudPresenter.data.view === "JOIN_LOBBY" && !Object.hasOwn(hiddenCloudPresenter.data, "cloudTop50")
+  && hiddenCloudPresenter.data.participants.includes("Minh A") && !JSON.stringify(hiddenCloudPresenter.data).includes("Submitted"), "Close & Reveal Presenter stays in a named join lobby without submission status or aggregate words");
+const revealBeforeClose = await call(`/owner/wordclouds/${cloudId}/transition`, { method: "POST", cookie, body: { action: "REVEAL_RESULTS", expectedRevision: cloud.wordCloud.revision } });
+assert(revealBeforeClose.response.status === 400 && revealBeforeClose.data.code === "REVEAL_REQUIRES_CLOSE", "Close & Reveal rejects a Presenter reveal before intake is closed");
 const cloudClosed = await call(`/owner/wordclouds/${cloudId}/transition`, { method: "POST", cookie, body: { action: "CLOSE", expectedRevision: cloud.wordCloud.revision } });
 assert(cloudClosed.response.ok && cloudClosed.data.wordCloud.phase === "CLOSED", "closing intake preserves the submitted aggregate");
+const cloudReveal = await call(`/owner/wordclouds/${cloudId}/transition`, { method: "POST", cookie, body: { action: "REVEAL_RESULTS", expectedRevision: cloudClosed.data.wordCloud.revision } });
+assert(cloudReveal.response.ok && cloudReveal.data.wordCloud.presenterRevealed, "trainer can reveal the final Presenter cloud after closing");
+const visibleCloudPresenter = await call("/presenter", { token: cloudPresenterToken.data.path.split("#")[1] });
+assert(visibleCloudPresenter.response.ok && visibleCloudPresenter.data.view === "FINAL_CLOUD" && visibleCloudPresenter.data.cloudTop50 && !JSON.stringify(visibleCloudPresenter.data).includes("Minh "), "revealed Presenter receives aggregate-only words and no participant identities");
+const cloudCsv = await call(`/owner/wordclouds/${cloudId}/export?format=csv`, { cookie });
+assert(cloudCsv.response.ok && cloudCsv.bytes[0] === 0xef && cloudCsv.text.includes("'=SUM(A1)") && !cloudCsv.text.includes("Guest "), "CSV export is aggregate-only, UTF-8 BOM encoded and formula-safe");
 cloudState = await call("/guest/wordcloud/state", { token: cloudJoinD.data.token });
 assert(cloudState.response.ok && cloudState.data.state === "CLOSED", "unsubmitted participants see the Closed state");
-const cloudReopened = await call(`/owner/wordclouds/${cloudId}/transition`, { method: "POST", cookie, body: { action: "REOPEN", expectedRevision: cloudClosed.data.wordCloud.revision } });
+const cloudReopened = await call(`/owner/wordclouds/${cloudId}/transition`, { method: "POST", cookie, body: { action: "REOPEN", expectedRevision: cloudReveal.data.wordCloud.revision } });
 assert(cloudReopened.response.ok && cloudReopened.data.wordCloud.phase === "OPEN", "trainer may reopen before archive");
 const cloudDSubmit = await call("/guest/wordcloud/submit", { method: "POST", token: cloudJoinD.data.token, body: { words: ["Celebration"], idempotencyKey: crypto.randomUUID() }, ip: `wordcloud-submit-d-${smokeRun}` });
 assert(cloudDSubmit.response.ok && cloudDSubmit.data.status === "SUBMITTED", "a participant who was still waiting can submit after reopen");
-const cloudRaceJoin = await call("/join/enter", { method: "POST", body: { pin: cloudPin, displayName: "" }, ip: `wordcloud-close-race-join-${smokeRun}` });
+const cloudRaceJoin = await call("/join/enter", { method: "POST", body: { pin: cloudPin, displayName: "Race Guest" }, ip: `wordcloud-close-race-join-${smokeRun}` });
 assert(cloudRaceJoin.response.status === 201, "participant can join before the close race");
 cloud = await call(`/owner/wordclouds/${cloudId}`, { cookie }).then((result) => result.data);
 const [cloudRaceSubmit, cloudRaceClose] = await Promise.all([
@@ -484,14 +495,14 @@ assert(cloudRaceReopen.response.ok && cloudRaceReopen.data.wordCloud.phase === "
 const wordCloudLoadCount = 200;
 const cloudLoadParticipants = [];
 for (let index = 0; index < wordCloudLoadCount; index += 1) {
-  const joined = await call("/join/enter", { method: "POST", body: { pin: cloudPin, displayName: "" }, ip: `wordcloud-load-join-${index}-${smokeRun}` });
-  assert(joined.response.status === 201 && joined.data.token, `Word Cloud load participant ${index + 1} joins anonymously`);
+  const joined = await call("/join/enter", { method: "POST", body: { pin: cloudPin, displayName: `Word Cloud Load ${index}` }, ip: `wordcloud-load-join-${index}-${smokeRun}` });
+  assert(joined.response.status === 201 && joined.data.token, `Word Cloud load participant ${index + 1} joins with a display name`);
   cloudLoadParticipants.push(joined.data.token);
 }
 const wordCloudLoadVotes = await Promise.all(cloudLoadParticipants.map((token, index) => call("/guest/wordcloud/submit", {
   method: "POST", token, body: { words: [index % 2 ? "Word Cloud load B" : "Word Cloud load A"], idempotencyKey: crypto.randomUUID() }, ip: `wordcloud-load-submit-${index}-${smokeRun}`,
 })));
-assert(wordCloudLoadVotes.every((result) => result.response.ok && result.data.status === "SUBMITTED"), "200 near-simultaneous anonymous Word Cloud submissions commit exactly once each");
+assert(wordCloudLoadVotes.every((result) => result.response.ok && result.data.status === "SUBMITTED"), "200 near-simultaneous Word Cloud submissions commit exactly once each");
 const wordCloudLoadResults = await call(`/owner/wordclouds/${cloudId}`, { cookie });
 const wordCloudLoadA = wordCloudLoadResults.data.aggregate.visibleTerms.find((term) => term.label === "Word Cloud load A");
 const wordCloudLoadB = wordCloudLoadResults.data.aggregate.visibleTerms.find((term) => term.label === "Word Cloud load B");
@@ -510,6 +521,24 @@ const cleanDuplicate = await call(`/owner/wordclouds/${cloudDuplicate.data.activ
 assert(cloudDuplicate.response.status === 201 && cleanDuplicate.data.wordCloud.phase === "DRAFT" && cleanDuplicate.data.counts.submitted === 0 && cleanDuplicate.data.wordCloud.joinPin === null, "duplicate creates a clean Draft with no responses or participant code");
 await call(`/owner/wordclouds/${cloudId}`, { method: "DELETE", cookie });
 await call(`/owner/wordclouds/${cloudDuplicate.data.activityId}`, { method: "DELETE", cookie });
+
+const liveCloudCreated = await call("/owner/wordclouds", { method: "POST", cookie, body: {
+  title: `Live Word Cloud smoke ${smokeRun}`, prompt: "What is happening now?", maxWords: 2, presentationMode: "LIVE_WORD_CLOUD", teamNames: [], saveAsDraft: false,
+} });
+const liveCloudId = liveCloudCreated.data.activityId;
+const liveCloudReady = await call(`/owner/wordclouds/${liveCloudId}`, { cookie });
+const liveCloudJoin = await call("/join/enter", { method: "POST", body: { pin: liveCloudReady.data.wordCloud.joinPin, displayName: "Live QA" }, ip: `wordcloud-live-join-${smokeRun}` });
+const liveCloudOpen = await call(`/owner/wordclouds/${liveCloudId}/transition`, { method: "POST", cookie, body: { action: "OPEN", expectedRevision: liveCloudReady.data.wordCloud.revision } });
+const liveCloudSubmit = await call("/guest/wordcloud/submit", { method: "POST", token: liveCloudJoin.data.token, body: { words: ["Live now"], idempotencyKey: crypto.randomUUID() }, ip: `wordcloud-live-submit-${smokeRun}` });
+const livePresenterToken = await call(`/owner/activities/${liveCloudId}/presenter-token`, { method: "POST", cookie, body: {} });
+const livePresenter = await call("/presenter", { token: livePresenterToken.data.path.split("#")[1] });
+assert(liveCloudCreated.response.status === 201 && liveCloudOpen.response.ok && liveCloudSubmit.response.ok && livePresenter.data.view === "LIVE_CLOUD" && livePresenter.data.cloudTop50?.some((term) => term.label === "Live now"), "Live Word Cloud reveals accepted words to Presenter automatically");
+const liveCloudCurrent = await call(`/owner/wordclouds/${liveCloudId}`, { cookie });
+const liveCloudHidden = await call(`/owner/wordclouds/${liveCloudId}/transition`, { method: "POST", cookie, body: { action: "HIDE_RESULTS", expectedRevision: liveCloudCurrent.data.wordCloud.revision } });
+const livePresenterHidden = await call("/presenter", { token: livePresenterToken.data.path.split("#")[1] });
+assert(liveCloudHidden.response.ok && livePresenterHidden.data.view === "JOIN_LOBBY" && !Object.hasOwn(livePresenterHidden.data, "cloudTop50"), "Live Word Cloud can emergency-hide the Presenter without stopping intake");
+await call(`/owner/wordclouds/${liveCloudId}/transition`, { method: "POST", cookie, body: { action: "CLOSE", expectedRevision: liveCloudHidden.data.wordCloud.revision } });
+await call(`/owner/wordclouds/${liveCloudId}`, { method: "DELETE", cookie });
 
 // Reflection Wall v1.0: private actor capabilities, live Post-its, flat
 // comments, idempotent reactions, reversible clustering and Presenter views.

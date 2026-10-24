@@ -45,14 +45,14 @@ async function wallById(db: D1Database, activityId: string): Promise<WallRow | n
       w.description,w.identity_mode,w.access_enabled,w.post_limit,w.phase,w.access_slug,w.presentation_mode,w.focus_column_id,w.spotlight_post_id,
       w.focus_cluster_id,w.clusters_visible,w.started_once,w.archived_at
     FROM activities a JOIN reflection_wall_configs w ON w.activity_id=a.id LEFT JOIN sessions s ON s.id=a.session_id
-    WHERE a.id=? AND a.tool_id='reflection-wall'`).bind(activityId).first<WallRow>();
+    WHERE a.id=? AND a.tool_id='reflection-wall' AND a.deleted_at IS NULL`).bind(activityId).first<WallRow>();
 }
 async function wallBySlug(db: D1Database, slug: string): Promise<WallRow | null> {
   return db.prepare(`SELECT a.id AS activity_id,a.session_id,a.title,a.state,a.join_pin,s.name AS session_name,s.status AS session_status,
       w.description,w.identity_mode,w.access_enabled,w.post_limit,w.phase,w.access_slug,w.presentation_mode,w.focus_column_id,w.spotlight_post_id,
       w.focus_cluster_id,w.clusters_visible,w.started_once,w.archived_at
     FROM activities a JOIN reflection_wall_configs w ON w.activity_id=a.id LEFT JOIN sessions s ON s.id=a.session_id
-    WHERE w.access_slug=? AND w.access_enabled=1 AND a.tool_id='reflection-wall'`).bind(slug).first<WallRow>();
+    WHERE w.access_slug=? AND w.access_enabled=1 AND a.tool_id='reflection-wall' AND a.deleted_at IS NULL`).bind(slug).first<WallRow>();
 }
 async function columnsFor(db: D1Database, activityId: string) {
   return (await db.prepare("SELECT id,title,question,sort_order,color_key FROM reflection_wall_columns WHERE activity_id=? ORDER BY sort_order").bind(activityId)
@@ -184,7 +184,7 @@ async function buildSnapshot(db: D1Database, wall: WallRow, options: { owner?: b
           comments: Math.max(0, Number(commentCount?.count ?? 0) - Number(commentCount?.hidden_count ?? 0)), hiddenComments: Number(commentCount?.hidden_count ?? 0),
           reactions: Object.values(reactionBreakdown).reduce((sum, count) => sum + count, 0), reactionBreakdown,
           byColumn: columnsWithCounts.map((column) => ({ id: column.id, title: column.title, posts: column.postCount, hidden: column.hiddenCount })) },
-    viewer: { hasActor: Boolean(actor), canWrite: Boolean(actor && wall.phase === "OPEN" && wall.session_status !== "completed"),
+    viewer: { hasActor: Boolean(actor), canWrite: Boolean(actor && wall.phase === "OPEN"),
       quotaUsed: actorPostCount, quotaRemaining: Math.max(0, Number(wall.post_limit) - actorPostCount) },
   };
 }
@@ -222,7 +222,7 @@ async function ownerRoute(request: Request, env: ReflectionEnv, url: URL): Promi
     const rows = await db.prepare(`SELECT a.id,a.title,a.state,a.session_id,s.name AS session_name,a.join_pin,w.phase,w.identity_mode,w.post_limit,w.access_slug,
       (SELECT COUNT(*) FROM reflection_wall_posts p WHERE p.activity_id=a.id) AS post_count,
       (SELECT COUNT(*) FROM reflection_wall_posts p WHERE p.activity_id=a.id AND p.hidden=0) AS visible_count
-      FROM activities a JOIN reflection_wall_configs w ON w.activity_id=a.id LEFT JOIN sessions s ON s.id=a.session_id ORDER BY a.updated_at DESC`).all();
+      FROM activities a JOIN reflection_wall_configs w ON w.activity_id=a.id LEFT JOIN sessions s ON s.id=a.session_id WHERE a.deleted_at IS NULL ORDER BY a.updated_at DESC`).all();
     return json({ activities: rows.results });
   }
   if (request.method === "POST" && url.pathname === "/api/owner/reflection-walls") {
@@ -278,7 +278,6 @@ async function ownerRoute(request: Request, env: ReflectionEnv, url: URL): Promi
     else if (data.action === "PAUSE" && wall.phase === "OPEN") next = "PAUSED";
     else if (data.action === "CLOSE" && ["OPEN","PAUSED"].includes(wall.phase)) next = "CLOSED";
     else if (data.action === "REOPEN" && ["CLOSED","ARCHIVED"].includes(wall.phase)) {
-      if (wall.session_status === "completed") return fail("Reopen the parent Session before reopening this Reflection Wall.", 409);
       next = "OPEN";
     } else if (data.action === "ARCHIVE" && wall.phase === "CLOSED") next = "ARCHIVED";
     else return fail("That lifecycle change is not available from the current state.", 409);
@@ -436,7 +435,7 @@ async function publicRoute(request: Request, env: ReflectionEnv, url: URL): Prom
   if (request.method === "GET" && !action) return json(await buildSnapshot(db, wall, { actor }));
   if (!actor) {
     if (request.method === "POST" && action === "actor") {
-      if (wall.phase !== "OPEN" || wall.session_status === "completed") return fail("This wall is read-only right now.", 409);
+      if (wall.phase !== "OPEN") return fail("This wall is read-only right now.", 409);
       if (!await publicRateLimit(request, db, env, "reflection-actor", 500)) return fail("Too many attempts. Wait a few minutes and try again.", 429);
       const data = await readBody(request, ActorInput); if (!data) return fail("Check your name and try again.", 400);
       if (wall.identity_mode === "named" && !data.displayName.trim()) return fail("Your name is required for this named wall.", 400);
@@ -449,7 +448,7 @@ async function publicRoute(request: Request, env: ReflectionEnv, url: URL): Prom
     return fail("Participant capability is missing or expired. Rejoin this wall to continue.", 401);
   }
   if (request.method === "POST" && action === "posts") {
-    if (wall.phase !== "OPEN" || wall.session_status === "completed") return fail("This wall is read-only right now.", 409);
+    if (wall.phase !== "OPEN") return fail("This wall is read-only right now.", 409);
     const data = await readBody(request, PostInput); if (!data) return fail("Check the Post-it text and selected column.", 400);
     const clean = validateReflectionText(data.body, 500); if (!clean.ok) return fail(clean.message, 400);
     const column = await db.prepare("SELECT id FROM reflection_wall_columns WHERE id=? AND activity_id=?").bind(data.columnId, wall.activity_id).first();
@@ -460,7 +459,7 @@ async function publicRoute(request: Request, env: ReflectionEnv, url: URL): Prom
     const postId = newId();
     const inserted = await db.prepare(`INSERT OR IGNORE INTO reflection_wall_posts(id,activity_id,column_id,actor_id,body,idempotency_key)
       SELECT ?,?,?,?,?,? FROM reflection_wall_configs w JOIN activities a ON a.id=w.activity_id LEFT JOIN sessions s ON s.id=a.session_id
-      WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open' AND (s.status IS NULL OR s.status!='completed')
+      WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open'
         AND (SELECT COUNT(*) FROM reflection_wall_posts p WHERE p.activity_id=w.activity_id AND p.actor_id=?) < ?`)
       .bind(postId, wall.activity_id, data.columnId, actor.id, clean.text, idempotencyKey, wall.activity_id, actor.id, Number(wall.post_limit)).run();
     if (!Number(inserted.meta.changes ?? 0)) {
@@ -468,40 +467,40 @@ async function publicRoute(request: Request, env: ReflectionEnv, url: URL): Prom
         .bind(wall.activity_id, actor.id, idempotencyKey).first<{ id: string }>();
       if (retry) return json({ postId: retry.id, alreadySaved: true });
       const current = await wallById(db, wall.activity_id);
-      if (!current || current.phase !== "OPEN" || current.session_status === "completed") return fail("This wall has just become read-only. Refresh and try again.", 409);
+      if (!current || current.phase !== "OPEN") return fail("This wall has just become read-only. Refresh and try again.", 409);
       return fail("You have reached the Post-it limit for this wall.", 409);
     }
     await db.prepare("UPDATE reflection_wall_configs SET started_once=1,updated_at=CURRENT_TIMESTAMP WHERE activity_id=?").bind(wall.activity_id).run();
     return json({ postId, saved: true }, 201);
   }
   if (request.method === "PATCH" && action?.startsWith("posts/") && itemId) {
-    if (wall.phase !== "OPEN" || wall.session_status === "completed") return fail("Post-its can only be edited while the wall is open.", 409);
+    if (wall.phase !== "OPEN") return fail("Post-its can only be edited while the wall is open.", 409);
     const data = await readBody(request, z.object({ body: z.string().max(500) })); if (!data) return fail("Check the Post-it text.", 400);
     const clean = validateReflectionText(data.body, 500); if (!clean.ok) return fail(clean.message, 400);
     const result = await db.prepare(`UPDATE reflection_wall_posts SET body=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND activity_id=? AND actor_id=? AND hidden=0
       AND EXISTS(SELECT 1 FROM reflection_wall_configs w JOIN activities a ON a.id=w.activity_id LEFT JOIN sessions s ON s.id=a.session_id
-        WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open' AND (s.status IS NULL OR s.status!='completed'))`)
+        WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open')`)
       .bind(clean.text, itemId, wall.activity_id, actor.id, wall.activity_id).run();
     if (!Number(result.meta.changes ?? 0)) return fail("This Post-it cannot be edited.", 403); return json({ saved: true });
   }
   if (request.method === "DELETE" && action?.startsWith("posts/") && itemId) {
-    if (wall.phase !== "OPEN" || wall.session_status === "completed") return fail("Post-its can only be deleted while the wall is open.", 409);
+    if (wall.phase !== "OPEN") return fail("Post-its can only be deleted while the wall is open.", 409);
     const deletion = await db.batch([
       db.prepare(`DELETE FROM reflection_wall_reactions WHERE activity_id=? AND (
         (target_type='post' AND target_id=?) OR (target_type='comment' AND target_id IN (SELECT id FROM reflection_wall_comments WHERE post_id=?)))
         AND EXISTS(SELECT 1 FROM reflection_wall_posts p JOIN reflection_wall_configs w ON w.activity_id=p.activity_id JOIN activities a ON a.id=w.activity_id LEFT JOIN sessions s ON s.id=a.session_id
-          WHERE p.id=? AND p.actor_id=? AND p.hidden=0 AND w.phase='OPEN' AND a.state='open' AND (s.status IS NULL OR s.status!='completed'))`)
+          WHERE p.id=? AND p.actor_id=? AND p.hidden=0 AND w.phase='OPEN' AND a.state='open')`)
         .bind(wall.activity_id, itemId, itemId, itemId, actor.id),
       db.prepare(`DELETE FROM reflection_wall_posts WHERE id=? AND activity_id=? AND actor_id=? AND hidden=0
         AND EXISTS(SELECT 1 FROM reflection_wall_configs w JOIN activities a ON a.id=w.activity_id LEFT JOIN sessions s ON s.id=a.session_id
-          WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open' AND (s.status IS NULL OR s.status!='completed'))`)
+          WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open')`)
         .bind(itemId, wall.activity_id, actor.id, wall.activity_id),
     ]);
     if (!Number(deletion[1]?.meta.changes ?? 0)) return fail("This Post-it cannot be deleted.", 403);
     return json({ deleted: true });
   }
   if (request.method === "POST" && action === "comments") {
-    if (wall.phase !== "OPEN" || wall.session_status === "completed") return fail("Comments can only be added while the wall is open.", 409);
+    if (wall.phase !== "OPEN") return fail("Comments can only be added while the wall is open.", 409);
     const data = await readBody(request, CommentInput); if (!data) return fail("Check the comment text and Post-it.", 400);
     const clean = validateReflectionText(data.body, 300); if (!clean.ok) return fail(clean.message, 400);
     const parent = await db.prepare("SELECT id FROM reflection_wall_posts WHERE id=? AND activity_id=? AND hidden=0").bind(data.postId, wall.activity_id).first();
@@ -512,7 +511,7 @@ async function publicRoute(request: Request, env: ReflectionEnv, url: URL): Prom
     const commentId = newId();
     const inserted = await db.prepare(`INSERT OR IGNORE INTO reflection_wall_comments(id,activity_id,post_id,actor_id,body,idempotency_key)
       SELECT ?,?,?,?,?,? FROM reflection_wall_configs w JOIN activities a ON a.id=w.activity_id LEFT JOIN sessions s ON s.id=a.session_id
-      WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open' AND (s.status IS NULL OR s.status!='completed')
+      WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open'
         AND EXISTS(SELECT 1 FROM reflection_wall_posts p WHERE p.id=? AND p.activity_id=? AND p.hidden=0)`)
       .bind(commentId, wall.activity_id, data.postId, actor.id, clean.text, key, wall.activity_id, data.postId, wall.activity_id).run();
     if (!Number(inserted.meta.changes ?? 0)) {
@@ -524,26 +523,26 @@ async function publicRoute(request: Request, env: ReflectionEnv, url: URL): Prom
     return json({ commentId, saved: true }, 201);
   }
   if ((request.method === "PATCH" || request.method === "DELETE") && action?.startsWith("comments/") && itemId) {
-    if (wall.phase !== "OPEN" || wall.session_status === "completed") return fail("Comments can only be changed while the wall is open.", 409);
+    if (wall.phase !== "OPEN") return fail("Comments can only be changed while the wall is open.", 409);
     if (request.method === "PATCH") {
       const data = await readBody(request, z.object({ body: z.string().max(300) })); if (!data) return fail("Check the comment text.", 400);
       const clean = validateReflectionText(data.body, 300); if (!clean.ok) return fail(clean.message, 400);
       const result = await db.prepare(`UPDATE reflection_wall_comments SET body=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND activity_id=? AND actor_id=? AND hidden=0
         AND EXISTS(SELECT 1 FROM reflection_wall_configs w JOIN activities a ON a.id=w.activity_id LEFT JOIN sessions s ON s.id=a.session_id
-          WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open' AND (s.status IS NULL OR s.status!='completed'))`)
+          WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open')`)
         .bind(clean.text, itemId, wall.activity_id, actor.id, wall.activity_id).run();
       if (!Number(result.meta.changes ?? 0)) return fail("This comment cannot be edited.", 403); return json({ saved: true });
     }
     const result = await db.prepare(`DELETE FROM reflection_wall_comments WHERE id=? AND activity_id=? AND actor_id=? AND hidden=0
       AND EXISTS(SELECT 1 FROM reflection_wall_configs w JOIN activities a ON a.id=w.activity_id LEFT JOIN sessions s ON s.id=a.session_id
-        WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open' AND (s.status IS NULL OR s.status!='completed'))`)
+        WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open')`)
       .bind(itemId, wall.activity_id, actor.id, wall.activity_id).run();
     if (!Number(result.meta.changes ?? 0)) return fail("This comment cannot be deleted.", 403);
     await db.prepare("DELETE FROM reflection_wall_reactions WHERE activity_id=? AND target_type='comment' AND target_id=?").bind(wall.activity_id, itemId).run();
     return json({ deleted: true });
   }
   if (request.method === "POST" && action === "reactions") {
-    if (wall.phase !== "OPEN" || wall.session_status === "completed") return fail("Reactions are available while the wall is open.", 409);
+    if (wall.phase !== "OPEN") return fail("Reactions are available while the wall is open.", 409);
     const data = await readBody(request, ReactionInput); if (!data || !reactions.has(data.reaction)) return fail("Choose one of the six available reactions.", 400);
     let targetPost = data.targetId;
     if (data.targetType === "comment") {
@@ -558,7 +557,7 @@ async function publicRoute(request: Request, env: ReflectionEnv, url: URL): Prom
         : "EXISTS(SELECT 1 FROM reflection_wall_comments c JOIN reflection_wall_posts p ON p.id=c.post_id WHERE c.id=? AND c.activity_id=? AND c.hidden=0 AND p.hidden=0)";
       const inserted = await db.prepare(`INSERT OR IGNORE INTO reflection_wall_reactions(id,activity_id,actor_id,target_type,target_id,reaction)
         SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM reflection_wall_configs w JOIN activities a ON a.id=w.activity_id LEFT JOIN sessions s ON s.id=a.session_id
-          WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open' AND (s.status IS NULL OR s.status!='completed')) AND ${targetClause}`)
+          WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open') AND ${targetClause}`)
         .bind(newId(), wall.activity_id, actor.id, data.targetType, data.targetId, data.reaction, wall.activity_id, data.targetId, wall.activity_id).run();
       if (!Number(inserted.meta.changes ?? 0)) {
         const alreadySelected = await db.prepare("SELECT 1 FROM reflection_wall_reactions WHERE activity_id=? AND actor_id=? AND target_type=? AND target_id=? AND reaction=?")
@@ -569,9 +568,9 @@ async function publicRoute(request: Request, env: ReflectionEnv, url: URL): Prom
     } else {
       const deleted = await db.prepare(`DELETE FROM reflection_wall_reactions WHERE activity_id=? AND actor_id=? AND target_type=? AND target_id=? AND reaction=?
         AND EXISTS(SELECT 1 FROM reflection_wall_configs w JOIN activities a ON a.id=w.activity_id LEFT JOIN sessions s ON s.id=a.session_id
-          WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open' AND (s.status IS NULL OR s.status!='completed'))`)
+          WHERE w.activity_id=? AND w.phase='OPEN' AND a.state='open')`)
         .bind(wall.activity_id, actor.id, data.targetType, data.targetId, data.reaction, wall.activity_id).run();
-      if (!Number(deleted.meta.changes ?? 0) && wall.phase === "OPEN" && wall.session_status !== "completed") return json({ saved: true, selected: false });
+      if (!Number(deleted.meta.changes ?? 0) && wall.phase === "OPEN") return json({ saved: true, selected: false });
       if (!Number(deleted.meta.changes ?? 0)) return fail("This wall is no longer writable.", 409);
     }
     return json({ saved: true, selected: data.selected });
@@ -585,7 +584,7 @@ export async function reflectionGuestRoute(request: Request, env: ReflectionEnv,
 export async function reflectionLookup(db: D1Database, pin: string) {
   return db.prepare(`SELECT w.access_slug,w.phase,w.identity_mode,a.id,a.title,a.state,a.session_id,s.name AS session_name,s.status AS session_status
     FROM activities a JOIN reflection_wall_configs w ON w.activity_id=a.id LEFT JOIN sessions s ON s.id=a.session_id
-    WHERE a.join_pin=? AND a.tool_id='reflection-wall' AND w.access_enabled=1`).bind(pin).first<{ access_slug: string; phase: string; identity_mode: string; id: string; title: string; state: string; session_id: string | null; session_name: string | null; session_status: string | null }>();
+    WHERE a.join_pin=? AND a.tool_id='reflection-wall' AND a.deleted_at IS NULL AND w.access_enabled=1`).bind(pin).first<{ access_slug: string; phase: string; identity_mode: string; id: string; title: string; state: string; session_id: string | null; session_name: string | null; session_status: string | null }>();
 }
 export async function reflectionPresenterRoute(request: Request, env: ReflectionEnv, token?: string): Promise<Response | null> {
   if (request.method !== "GET") return null;
