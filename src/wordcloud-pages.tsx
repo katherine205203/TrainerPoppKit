@@ -165,12 +165,12 @@ export function WordCloudControlPage() {
   }
   async function openPresenter() {
     setBusy(true); setActionError("");
-    const presenterWindow = window.open("about:blank", "_blank", "noopener,noreferrer");
+    const presenterWindow = window.open("about:blank", "_blank");
     try {
       const result = await post<{ path: string }>(`/owner/activities/${activityId}/presenter-token`, {});
       const url = `${window.location.origin}${result.path}`;
       setPresenterLink(url);
-      if (presenterWindow) presenterWindow.location.href = url;
+      if (presenterWindow) { presenterWindow.opener = null; presenterWindow.location.href = url; }
     } catch (reason) { presenterWindow?.close(); setActionError(reason instanceof Error ? reason.message : "Could not open Presenter Mode."); }
     finally { setBusy(false); }
   }
