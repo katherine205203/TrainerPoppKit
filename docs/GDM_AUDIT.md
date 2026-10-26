@@ -26,7 +26,7 @@ Owner routes are under `/api/owner/gdm/*`; Archive/Results, Session data, Activi
 | GDM-11 Reset/New Run rotates PIN but keeps stable links | Implemented | Activity and Session PIN rotation does not change stable access slug. |
 | GDM-12 Reset creates a new Run ID | Implemented | Old Run is permanently removed; a fresh sequential Run is created. |
 | GDM-13 No Activity edits while Live; Run config snapshot is frozen | Implemented | Live guards and per-Run config/question snapshots preserve prior history. |
-| GDM-14 Archived parent Session does not block Activity New Run/Reopen | Implemented | Activity controls work independently; Session remains archived and Session join remains disabled. |
+| GDM-14 Archived parent Session does not block Activity New Run/Reopen | Implemented with Quiz v1.2 exception | Other module Activity controls work independently. Quiz v1.2 Decision Register explicitly requires reopening the parent Session before another Run; the guard covers Quiz setup and generic GDM Start New Run and Activity Reset routes. |
 | GDM-15 Trainer-only history; participant Current Run only | Implemented | Owner-authenticated Run routes; module guest capabilities remain scoped to their active Run. |
 | GDM-16 Delete one Run to Trash | Implemented | Per-Run Delete action and 30-day restore package. |
 | GDM-17 At most one Live Run per Activity | Implemented | One shared Current pointer, Live guards and Quiz's unique active/current constraints. Different Activities remain independent. |
@@ -55,6 +55,7 @@ Owner routes are under `/api/owner/gdm/*`; Archive/Results, Session data, Activi
 - **Operation receipt window:** the data transaction and the `gdm_operations` DONE receipt are separate. If the Worker stops after the transaction commits but before saving its receipt, reusing that operation ID returns a conflict; the committed state remains inspectable, and the trainer can refresh before issuing a new action. This does not leave a partial Run/trash cascade.
 - **Excel format:** `.xls` downloads are HTML tables readable by Excel, not native `.xlsx` workbooks. CSV remains available.
 - **Operational validation:** local D1/Worker checks do not certify Cloudflare production migrations, scheduled purge timing, backups/recovery or a live workshop. Those were not run as part of this request.
+- **Quiz v1.2 archived-Session override:** generic GDM's GDM-14 behavior continues for other modules. For Quiz, Update Pack v1.2 has higher module-specific authority and requires an explicit Session reopen before any Activity-level new Run/reset path creates a Quiz Run.
 
 ## Verification performed
 

@@ -90,9 +90,29 @@ The supplied Reflection Wall v1.0 Decision Register is authoritative for this mo
 
 The participant experience is mobile-first; the trainer workspace is desktop-oriented and follows the existing Popp! visual system. The pack's question/content is trainer-authored rather than a published assessment instrument.
 
+## Quiz Module v1.2 Update Pack decisions
+
+The supplied Quiz Update Pack v1.2 Decision Register and State/Scoring Rules are authoritative for this module update. Their CLOSED choices take precedence over UI Atlas details; the Atlas and screenshots guide visual treatment only. These rules extend Quiz v1.0 and reuse the shared single-owner Session, Activity, Run, Participant, PIN and GDM contracts.
+
+| ID | Status | Decision / boundary |
+|---|---|---|
+| QTYPE-01 | LOCKED | Exactly five text-only types: Single Choice, Multiple Choice, True/False, Reorder and Match Pairs. No fill-in-the-blank, images or media. |
+| CREATE-01 | LOCKED | Authoring has three navigable steps: Quiz Basics, Focused Question Builder, and Review & Publish. Draft autosaves; previewing does not create Activity, Run, Participant or Answer records. |
+| QTYPE-02 | LOCKED | Reorder uses 3–6 items; Match Pairs uses 2–5 one-to-one pairs. Partial credit is the fraction of positions/pairs correct. Legacy choice types remain all-or-nothing. |
+| SC-01–SC-03 | LOCKED | Live Accuracy + Speed multiplies partial credit by the 1×–2× Speed factor; Hope ×2/×3 multiplies partial points too. Only a fully correct question counts toward the correct-question tie-break. |
+| SC-04 | LOCKED | When feedback is permitted, show Correct / Partially Correct / Incorrect and earned points. A Manual Live per-question reveal exposes only that question; final score, standings and podium stay hidden until the completed Run is explicitly revealed by the Trainer. |
+| QUX-01–QUX-03 | LOCKED | Reorder supports drag and accessible up/down controls. Match uses tap-left then tap-right, shows established pairs and allows Undo. Self-paced expiry or Trainer End grades saved partial work; untouched items remain unanswered. |
+| QUX-04–QUX-05 | LOCKED | Changing question type requires confirmation, keeps stem/explanation and clears incompatible answer data. Self-paced question order may be shuffled per attempt; Reorder/Match presentation order is shuffled while stable IDs preserve grading. |
+| AUTHOR-01–AUTHOR-02 | LOCKED | Editing a Published Quiz starts a Draft Revision based on that version. Publish creates the next immutable version; existing Runs keep their content snapshot. Builder/Review preview supports Participant Mobile and Presenter without creating a Run. |
+| PRESENT-01–PRESENT-06 | LOCKED | Live completion always produces Completed + Final Results Hidden in Manual and Automatic modes. Trainer explicitly reveals final results. Presenter is pinned to a Run; an older completed Run can be revealed after a newer Run starts. New Runs rotate the Activity PIN and require fresh participant membership. At least one valid participant is required to start a Live Run. |
+| GDM-QUIZ-01 | LOCKED | An archived parent Session must be reopened before creating another Quiz Run. Once the Session is reopened, the existing Quiz Activity can create its next Run under the normal sequential-run rule. |
+
+The scoring base is `round(basePoints × accuracyRatio × speedFactor × hopeMultiplier)` with rounding once at final participant points. Speed is server-timed; Self-paced uses factor 1. New shuffled Reorder with no participant interaction is unanswered, not accidental position credit. These implementation details follow the pack's Business Rules and technical safeguards; they do not add new product decisions.
+
 ## Change log
 - 2026-10-22: Initial decisions assembled from approved discussion and the supplied six-page reference PDF. No unapproved proposal promoted to `LOCKED`.
 - 2026-10-22: Added SCARF Assessment pack decisions SC-D1–SC-D6. The supplied v0.2 instrument is implemented for the user-requested release but is clearly marked experimental and unvalidated.
 - 2026-10-23: Added SC-D7–SC-D9 from SCARF Product Pack v1.2 and locked the v1.1 Integrated Needs scoring, legacy preservation, and presenter suppression rules.
 - 2026-10-22: Added Poll v1.2 module decisions POLL-D1–POLL-D9. A-01/A-02 remain explicitly open and provisional.
 - 2026-10-22: Added Reflection Wall v1.0 module decisions RW-D1–RW-D8 from its locked Decision Register.
+- 2026-10-26: Added Quiz Module v1.2 Update Pack CLOSED decisions and implementation boundaries for partial scoring, Draft Revision, run-scoped Presenter, final reveal, and the archived-Session guard.

@@ -42,6 +42,11 @@ async function activity(db: D1Database, activityId: string, includeDeleted = fal
     FROM activities a LEFT JOIN sessions s ON s.id=a.session_id WHERE a.id=? ${includeDeleted ? "" : "AND a.deleted_at IS NULL"}`)
     .bind(activityId).first<Activity>();
 }
+async function archivedQuizSessionGuard(db: D1Database, row: Activity): Promise<Response | null> {
+  if (row.tool_id !== "quiz" || !row.session_id) return null;
+  const session = await db.prepare("SELECT status FROM sessions WHERE id=? AND deleted_at IS NULL").bind(row.session_id).first<{status:string}>();
+  return session?.status === "completed" ? fail("Reopen the archived Session before creating another Quiz Run.",409) : null;
+}
 async function currentRun(db: D1Database, activityId: string): Promise<Run | null> {
   return db.prepare("SELECT * FROM gdm_runs WHERE activity_id=? AND is_current=1 AND permanent_deleted_at IS NULL ORDER BY sequence DESC LIMIT 1")
     .bind(activityId).first<Run>();
@@ -863,6 +868,7 @@ export async function gdmOwnerRoute(request: Request, env: Env, url: URL): Promi
       const input=await read(request,OperationInput);if(!input)return fail("Refresh this Activity before starting a new Run.");
       return idempotent(db,input.operationId,"START_NEW_RUN",activityId,async()=>{
         const row=await activity(db,activityId);if(!row)return fail("Activity not found.",404);
+        const sessionGuard=await archivedQuizSessionGuard(db,row);if(sessionGuard)return sessionGuard;
         const created=await startNewRun(env,row);
         return json({runId:created.runId,sequence:created.sequence,pin:created.pin,state:"READY"},201);
       });
@@ -870,7 +876,7 @@ export async function gdmOwnerRoute(request: Request, env: Env, url: URL): Promi
     if(request.method==="POST"&&action==="reset") {
       const input=await read(request,ActivityResetInput);if(!input)return fail("Choose the Run data to reset.");
       return idempotent(db,input.operationId,"RESET_ACTIVITY",activityId,async()=>{
-        const row=await activity(db,activityId);if(!row)return fail("Activity not found.",404);return json({reset:true,...await resetActivity(env,row,input.scope)});
+        const row=await activity(db,activityId);if(!row)return fail("Activity not found.",404);const sessionGuard=await archivedQuizSessionGuard(db,row);if(sessionGuard)return sessionGuard;return json({reset:true,...await resetActivity(env,row,input.scope)});
       });
     }
     if(request.method==="POST"&&action==="delete") {
