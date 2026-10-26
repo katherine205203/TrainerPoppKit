@@ -31,26 +31,37 @@ export function QuizBuilderPage(){
   const {definitionId}=useParams(),navigate=useNavigate(),[params]=useSearchParams(),isNew=!definitionId||definitionId==="new";
   const [creationMode]=useState(isNew);
   const [quiz,setQuiz]=useState<QuizContent>(emptyQuiz),[selected,setSelected]=useState(0),[step,setStep]=useState<Tab>("basics"),[preview,setPreview]=useState<"participant"|"presenter">("participant");
-  const [draftId,setDraftId]=useState<string|null>(isNew?null:definitionId),[definition,setDefinition]=useState<Definition|null>(null),[loading,setLoading]=useState(!isNew),[ready,setReady]=useState(isNew),[dirty,setDirty]=useState(false),[saveState,setSaveState]=useState(isNew?"Draft not created yet":"Loading…"),[error,setError]=useState(""),[success,setSuccess]=useState(""),[busy,setBusy]=useState(false);
-  const editVersion=useRef(0);
+  const [draftId,setDraftId]=useState<string|null>(isNew?null:definitionId),[definition,setDefinition]=useState<Definition|null>(null),[loading,setLoading]=useState(!isNew),[ready,setReady]=useState(isNew),[dirty,setDirty]=useState(false),[saveState,setSaveState]=useState(isNew?"Draft not created yet":"Loading…"),[error,setError]=useState(""),[success,setSuccess]=useState(""),[busy,setBusy]=useState(false),[editTick,setEditTick]=useState(0);
+  const editVersion=useRef(0),savedVersion=useRef(0),saveInFlight=useRef<Promise<string|null>|null>(null),quizRef=useRef(quiz),draftIdRef=useRef(draftId);
+  const sessionId=params.get("sessionId")||"";
+  useEffect(()=>{quizRef.current=quiz;},[quiz]);
+  useEffect(()=>{draftIdRef.current=draftId;},[draftId]);
   useEffect(()=>{if(isNew||!definitionId)return;let live=true;void api<{definition:Definition}>("/owner/quiz/definitions/"+definitionId).then(async result=>{
     if(!live)return;let def=result.definition;
     if(def.status==="PUBLISHED"&&def.draft_base_version!==def.published_version){setSaveState("Preparing Draft Revision…");const revision=await post<{content:QuizContent;revision:boolean}>("/owner/quiz/definitions/"+def.id+"/revise",{});def={...def,content:revision.content,draft_base_version:def.published_version};}
     if(!live)return;setDefinition(def);setDraftId(def.id);setQuiz(def.content);setReady(true);setSaveState(def.status==="PUBLISHED"?`Draft Revision · based on v${def.published_version}`:"Saved");setLoading(false);
   }).catch(reason=>{if(live){setError(reason instanceof Error?reason.message:"Could not open Quiz.");setLoading(false);}});return()=>{live=false;};},[definitionId,isNew]);
   const question=quiz.questions[selected];
-  const errors=validateQuiz(quiz);
-  function markDirty(){editVersion.current++;setDirty(true);setSaveState("Unsaved changes");setError("");setSuccess("");}
+  const errors=step==="review"?validateQuiz(quiz):[];
+  function markDirty(){editVersion.current++;setEditTick(value=>value+1);setDirty(true);setSaveState("Unsaved changes");setError("");setSuccess("");}
   function updateQuiz(patch:Partial<QuizContent>){markDirty();setQuiz(current=>({...current,...patch}));}
   function updateQuestion(change:(current:QuizQuestion)=>QuizQuestion){if(!question)return;markDirty();setQuiz(current=>({...current,questions:current.questions.map((item,index)=>index===selected?change(item):item)}));}
-  const persist=useCallback(async(snapshot=quiz)=>{
-    if(!ready)return null;setSaveState("Saving…");setError("");const version=editVersion.current;
-    try{let id=draftId;if(!id){const result=await post<{definition:{id:string}}>("/owner/quiz/definitions",snapshot);id=result.definition.id;setDraftId(id);navigate("/quiz/definitions/"+id+(params.get("sessionId")?"?sessionId="+params.get("sessionId"):""),{replace:true});}
-      else await api("/owner/quiz/definitions/"+id,{method:"PUT",body:JSON.stringify(snapshot)});
-      if(version===editVersion.current){setDirty(false);setSaveState("Saved");}return id;
-    }catch(reason){setSaveState("Failed to save");setError(reason instanceof Error?reason.message:"Could not save this Draft.");throw reason;}
-  },[ready,draftId,quiz,navigate,params]);
-  useEffect(()=>{if(!ready||!dirty||busy)return;const timer=window.setTimeout(()=>{void persist().catch(()=>{});},650);return()=>window.clearTimeout(timer);},[persist,ready,dirty,busy]);
+  const persist=useCallback(async()=>{
+    if(!ready)return null;
+    while(saveInFlight.current){try{await saveInFlight.current;}catch{/* Retry using the latest Draft snapshot below. */}}
+    const existingId=draftIdRef.current;
+    if(existingId&&editVersion.current===savedVersion.current)return existingId;
+    setSaveState("Saving…");setError("");const snapshot=quizRef.current,version=editVersion.current;
+    const task=(async()=>{
+      if(!existingId){const result=await post<{definition:{id:string}}>("/owner/quiz/definitions",snapshot),id=result.definition.id;draftIdRef.current=id;setDraftId(id);navigate("/quiz/definitions/"+id+(sessionId?"?sessionId="+sessionId:""),{replace:true});return id;}
+      await api("/owner/quiz/definitions/"+existingId,{method:"PUT",body:JSON.stringify(snapshot)});return existingId;
+    })();
+    saveInFlight.current=task;
+    try{const id=await task;savedVersion.current=version;if(version===editVersion.current){setDirty(false);setSaveState("Saved");}else{setDirty(true);setSaveState("Unsaved changes");}return id;}
+    catch(reason){setSaveState("Failed to save");setError(reason instanceof Error?reason.message:"Could not save this Draft.");throw reason;}
+    finally{if(saveInFlight.current===task)saveInFlight.current=null;}
+  },[ready,navigate,sessionId]);
+  useEffect(()=>{if(!ready||!dirty||busy)return;const timer=window.setTimeout(()=>{void persist().catch(()=>{});},350);return()=>window.clearTimeout(timer);},[persist,ready,dirty,busy,editTick]);
   async function saveAndGo(next:Tab){setBusy(true);try{await persist();setStep(next);}catch(reason){setError(reason instanceof Error?reason.message:"Could not save this Draft.");}finally{setBusy(false);}}
   function changeType(type:QuizQuestion["type"]){if(!question||question.type===type)return;if(!window.confirm("Change question type? The prompt, explanation and Hope setting will stay. Existing answer content will be cleared."))return;updateQuestion(q=>blankQuestion(type,{id:q.id,stem:q.stem,explanation:q.explanation,hopeMultiplier:q.hopeMultiplier}));}
   function addQuestion(){if(quiz.questions.length>=100)return;const next=blankQuestion("SINGLE_CHOICE");markDirty();setQuiz(value=>({...value,questions:[...value.questions,next]}));setSelected(quiz.questions.length);}

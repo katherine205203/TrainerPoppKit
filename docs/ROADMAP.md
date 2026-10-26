@@ -81,6 +81,13 @@
 - Deployment: additive migration `0018_quiz_v12.sql` applied to production D1; Worker `trainerpopp-kit` deployed at `https://trainerpopp-kit.trainerpoppkit.workers.dev` (version `b864d971-c78e-41f8-afc4-c069110dc5d4`). Public `/api/health` returned HTTP 200 and remote D1 has no pending migrations.
 - Remaining: all 92 pack acceptance cases were not exercised end to end; pixel-diff review of all 21 references, production capacity and trainer-led UAT remain unverified.
 
+## Phase 15 — Quiz runtime and interaction responsiveness
+- B15a: **Implemented locally:** Console polling uses a compact owner projection, skips Live score calculation outside the leaderboard, avoids the second Activity request for the Run PIN, and computes Presenter question stats once. Trainer actions can return a compact acknowledgement instead of serializing full Run state. Polling pauses and aborts while the tab is hidden; the display clock ticks once per second.
+- B15b: **Implemented locally:** Draft saves debounce at 350 ms, skip unchanged PUTs, serialize overlapping saves against the newest draft snapshot, and validate only on Review. Non-Quiz modules load on demand instead of bloating Quiz startup.
+- Changed files / migration: `src/quiz-pages.tsx`, `src/quiz-authoring.tsx`, `src/worker/quiz.ts`, `src/App.tsx`, `scripts/quiz-smoke.mjs`; no schema migration.
+- Acceptance / regression: `npm test` passes 65 tests; `npm run smoke:quiz` passes the compact owner projection, PIN rotation/privacy, compact command response, five question types and Run lifecycle; `npm run smoke:gdm` passes 83 assertions; `npm run smoke` passes 1,030 cross-tool assertions; `npm run load:quiz` accepts 200/200 concurrent answers (p95 820 ms; early lock acknowledgement 19 ms). `npm run typecheck`, `npm run lint`, `npm run build`, and `git diff --check` pass. The initial client JavaScript bundle fell from 668.71 KB (178.10 KB gzip) to 297.40 KB (92.40 KB gzip); the Quiz chunk remains about 89 KB (21.91 KB gzip). Local load results do not establish remote capacity.
+- Remaining: the full 92-case Quiz acceptance matrix, remote performance under real trainer/participant concurrency, cross-browser reconnection, and pixel-diff/UAT checks are not verified. The build still reports a >500 KB worker bundle; this change targets the browser entry bundle and Quiz interaction waits.
+
 ## Per-batch handoff template
 
 ```markdown

@@ -7,16 +7,55 @@ import { api, post } from "./api";
 import { AuthProvider } from "./AuthProvider";
 import { useAuth } from "./auth-context";
 import { BrandMark, Button, ErrorState, LoadingState, Mascot } from "./components";
-import {
-  ActivitySetupPage, ActivityLivePage, ActivityResultPage, CreateSessionPage, HomePage,
-  JoinPage, ParticipantInfoPage, ParticipantRunnerPage, ParticipantDonePage, PresenterConsolePage,
-  PublicPresenterPage, ScarfDetailPage, ScarfPublicPresenterPage, SessionDetailPage, SessionsPage, ToolsPage,
-} from "./pages";
-import { ScarfPersonalResultsPage } from "./scarf-participant";
-import { PollControlPage, PollEditorPage, PollParticipantPage, PollPresenterControlsPage, PollPublicPresenterPage, PollResultsPage, PollSessionJoinPage, PollToolOverviewPage } from "./poll-pages";
-import { WordCloudControlPage, WordCloudEditorPage, WordCloudOverviewPage, WordCloudPresenterControlsPage, WordCloudPublicPresenterPage, WordCloudResultsPage } from "./wordcloud-pages";
-import { ReflectionWallControlPage, ReflectionWallEditorPage, ReflectionWallParticipantPage, ReflectionWallPublicPresenterPage, ReflectionWallToolOverviewPage } from "./reflection-wall-pages";
-import { GdmActivityPage, GdmArchivePage, GdmRunPage, GdmSessionPage } from "./gdm-pages";
+function lazyNamedPage<M, K extends keyof M>(loader: () => Promise<M>, name: K) {
+  return lazy(async () => ({ default: (await loader())[name] as React.ComponentType<object> }));
+}
+const loadCorePages = () => import("./pages");
+const loadScarfParticipant = () => import("./scarf-participant");
+const loadPollPages = () => import("./poll-pages");
+const loadWordCloudPages = () => import("./wordcloud-pages");
+const loadReflectionWallPages = () => import("./reflection-wall-pages");
+const loadGdmPages = () => import("./gdm-pages");
+const ActivitySetupPage = lazyNamedPage(loadCorePages,"ActivitySetupPage");
+const ActivityLivePage = lazyNamedPage(loadCorePages,"ActivityLivePage");
+const ActivityResultPage = lazyNamedPage(loadCorePages,"ActivityResultPage");
+const CreateSessionPage = lazyNamedPage(loadCorePages,"CreateSessionPage");
+const HomePage = lazyNamedPage(loadCorePages,"HomePage");
+const JoinPage = lazyNamedPage(loadCorePages,"JoinPage");
+const ParticipantInfoPage = lazyNamedPage(loadCorePages,"ParticipantInfoPage");
+const ParticipantRunnerPage = lazyNamedPage(loadCorePages,"ParticipantRunnerPage");
+const ParticipantDonePage = lazyNamedPage(loadCorePages,"ParticipantDonePage");
+const PresenterConsolePage = lazyNamedPage(loadCorePages,"PresenterConsolePage");
+const PublicPresenterPage = lazyNamedPage(loadCorePages,"PublicPresenterPage");
+const ScarfDetailPage = lazyNamedPage(loadCorePages,"ScarfDetailPage");
+const ScarfPublicPresenterPage = lazyNamedPage(loadCorePages,"ScarfPublicPresenterPage");
+const SessionDetailPage = lazyNamedPage(loadCorePages,"SessionDetailPage");
+const SessionsPage = lazyNamedPage(loadCorePages,"SessionsPage");
+const ToolsPage = lazyNamedPage(loadCorePages,"ToolsPage");
+const ScarfPersonalResultsPage = lazyNamedPage(loadScarfParticipant,"ScarfPersonalResultsPage");
+const PollControlPage = lazyNamedPage(loadPollPages,"PollControlPage");
+const PollEditorPage = lazyNamedPage(loadPollPages,"PollEditorPage");
+const PollParticipantPage = lazyNamedPage(loadPollPages,"PollParticipantPage");
+const PollPresenterControlsPage = lazyNamedPage(loadPollPages,"PollPresenterControlsPage");
+const PollPublicPresenterPage = lazyNamedPage(loadPollPages,"PollPublicPresenterPage");
+const PollResultsPage = lazyNamedPage(loadPollPages,"PollResultsPage");
+const PollSessionJoinPage = lazyNamedPage(loadPollPages,"PollSessionJoinPage");
+const PollToolOverviewPage = lazyNamedPage(loadPollPages,"PollToolOverviewPage");
+const WordCloudControlPage = lazyNamedPage(loadWordCloudPages,"WordCloudControlPage");
+const WordCloudEditorPage = lazyNamedPage(loadWordCloudPages,"WordCloudEditorPage");
+const WordCloudOverviewPage = lazyNamedPage(loadWordCloudPages,"WordCloudOverviewPage");
+const WordCloudPresenterControlsPage = lazyNamedPage(loadWordCloudPages,"WordCloudPresenterControlsPage");
+const WordCloudPublicPresenterPage = lazyNamedPage(loadWordCloudPages,"WordCloudPublicPresenterPage");
+const WordCloudResultsPage = lazyNamedPage(loadWordCloudPages,"WordCloudResultsPage");
+const ReflectionWallControlPage = lazyNamedPage(loadReflectionWallPages,"ReflectionWallControlPage");
+const ReflectionWallEditorPage = lazyNamedPage(loadReflectionWallPages,"ReflectionWallEditorPage");
+const ReflectionWallParticipantPage = lazyNamedPage(loadReflectionWallPages,"ReflectionWallParticipantPage");
+const ReflectionWallPublicPresenterPage = lazyNamedPage(loadReflectionWallPages,"ReflectionWallPublicPresenterPage");
+const ReflectionWallToolOverviewPage = lazyNamedPage(loadReflectionWallPages,"ReflectionWallToolOverviewPage");
+const GdmActivityPage = lazyNamedPage(loadGdmPages,"GdmActivityPage");
+const GdmArchivePage = lazyNamedPage(loadGdmPages,"GdmArchivePage");
+const GdmRunPage = lazyNamedPage(loadGdmPages,"GdmRunPage");
+const GdmSessionPage = lazyNamedPage(loadGdmPages,"GdmSessionPage");
 
 const LearningBehaviorsAnalyticsPage = lazy(() => import("./learning-behaviors-pages").then((module) => ({ default: module.LearningBehaviorsAnalyticsPage })));
 const LearningBehaviorsControlPage = lazy(() => import("./learning-behaviors-pages").then((module) => ({ default: module.LearningBehaviorsControlPage })));
@@ -147,7 +186,7 @@ function PresenterRoute() {
 }
 
 function AppRoutes() {
-  return <Routes>
+  return <Suspense fallback={<LoadingState label="Opening your workspace…"/>}><Routes>
     <Route path="/activity/:accessSlug" element={<StableActivityAccessPage />} />
     <Route path="/join" element={<JoinPage />} />
     <Route path="/quiz/join/:activityId" element={<Suspense fallback={<LoadingState label="Opening Quiz join…"/>}><QuizJoinPage/></Suspense>} />
@@ -215,7 +254,7 @@ function AppRoutes() {
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Route>
-  </Routes>;
+  </Routes></Suspense>;
 }
 
 function ActivityLiveIndex() {

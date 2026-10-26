@@ -10,7 +10,7 @@ type Run = {
   state: "LOBBY_OPEN" | "RUNNING" | "PAUSED" | "COMPLETED"; phase: string; current_index: number;
   phase_started_at: number | null; phase_deadline_at: number | null; phase_remaining_ms: number | null;
   paused_from_phase: string | null; active_elapsed_ms: number; revision: number; completion_reason: string | null;
-  presenter_token_hash: string | null; started_at: number | null; completed_at: number | null;
+  presenter_token_hash: string | null; started_at: number | null; completed_at: number | null; activity_join_pin?: string;
 };
 type Person = { id: string; run_id: string; nickname: string; normalized_nickname: string; team_id: string | null; joined_at: number; disqualified_at: number | null; disqualification_reason: string | null };
 type Team = { id: string; run_id: string; name: string; sort_order: number };
@@ -62,7 +62,7 @@ const uuid = () => crypto.randomUUID();
 const content = (run: Run) => JSON.parse(run.snapshot_json) as QuizContent;
 const config = (run: Run) => JSON.parse(run.config_json) as z.infer<typeof runSchema>;
 async function getRun(db: D1Database, runId: string): Promise<Run | null> {
-  return db.prepare("SELECT q.* FROM quiz_runs q JOIN activities a ON a.id=q.activity_id WHERE q.id = ? AND q.deleted_at IS NULL AND q.permanent_deleted_at IS NULL AND a.deleted_at IS NULL")
+  return db.prepare("SELECT q.*,a.join_pin AS activity_join_pin FROM quiz_runs q JOIN activities a ON a.id=q.activity_id WHERE q.id = ? AND q.deleted_at IS NULL AND q.permanent_deleted_at IS NULL AND a.deleted_at IS NULL")
     .bind(runId).first<Run>();
 }
 async function audit(db: D1Database, runId: string, actor: string, action: string, targetId: string | null, reason: string | null, before: unknown, after: unknown) {
@@ -153,17 +153,33 @@ async function uniquePin(db: D1Database): Promise<string> {
   }
   throw new Error("Could not allocate a join PIN");
 }
-async function ownerState(db: D1Database, run: Run) {
-  const liveAnswers = await answers(db, run.id);
-  return { run: { ...run, snapshot: content(run), config: config(run), snapshot_json: undefined, config_json: undefined },
-    teams: await teams(db, run.id), participants: await people(db, run.id),
-    eligible: run.current_index >= 0 ? (await db.prepare("SELECT participant_id FROM quiz_question_eligibility WHERE run_id=? AND question_index=?").bind(run.id, run.current_index).all<{participant_id:string}>()).results.map((e) => e.participant_id) : [],
-    answerCount: liveAnswers.filter((answer) => answer.question_index === run.current_index).length,
-    submittedIds: liveAnswers.filter((answer) => answer.question_index === run.current_index).map((answer) => answer.participant_id),
+async function ownerState(db: D1Database, run: Run, options: { includeResults?: boolean; includeDetails?: boolean } = {}) {
+  const includeResults = options.includeResults !== false, includeDetails = options.includeDetails !== false;
+  const [runTeams, participants] = await Promise.all([teams(db, run.id), people(db, run.id)]);
+  const { activity_join_pin, ...ownerRun } = run;
+  const eligible = run.current_index >= 0 ? (await db.prepare("SELECT participant_id FROM quiz_question_eligibility WHERE run_id=? AND question_index=?").bind(run.id, run.current_index).all<{participant_id:string}>()).results.map((entry) => entry.participant_id) : [];
+  const [liveAnswers, activeAnswerIds, draftRows, correctionRows] = await Promise.all([
+    includeDetails ? answers(db, run.id) : Promise.resolve([] as Answer[]),
+    !includeDetails && run.run_type === "LIVE" && run.current_index >= 0
+      ? db.prepare("SELECT participant_id FROM quiz_live_answers WHERE run_id=? AND question_index=?").bind(run.id, run.current_index).all<{participant_id:string}>().then((result) => result.results.map((entry) => entry.participant_id))
+      : Promise.resolve(null as string[] | null),
+    includeDetails ? db.prepare("SELECT participant_id,question_index,selected_json,version,interacted FROM quiz_drafts WHERE run_id=?").bind(run.id).all<Draft>().then((result) => result.results) : Promise.resolve([] as Draft[]),
+    includeDetails ? corrections(db, run.id) : Promise.resolve([] as Correction[]),
+  ]);
+  const attempts = !includeResults && run.run_type === "SELF_PACED"
+    ? (await db.prepare("SELECT participant_id,state FROM quiz_attempts WHERE run_id=?").bind(run.id).all<{participant_id:string;state:string}>()).results
+    : null;
+  const needsScore = includeResults || run.phase === "LEADERBOARD" || Boolean(attempts?.some((attempt) => ["SUBMITTED", "AUTO_SUBMITTED"].includes(attempt.state)));
+  const scored = needsScore ? await scoreResults(db, run) : null;
+  const results = scored ?? { individual: [], team: [], questionStats: [], participants: run.run_type === "SELF_PACED"
+    ? participants.map((person) => ({ id: person.id, nickname: person.nickname, teamId: person.team_id, points: 0, correct: 0, dq: Boolean(person.disqualified_at) })) : [],
+    attemptStatuses: attempts ?? [] };
+  const submittedIds = activeAnswerIds ?? liveAnswers.filter((answer) => answer.question_index === run.current_index).map((answer) => answer.participant_id);
+  return { run: { ...ownerRun, joinPin: activity_join_pin ?? "", snapshot: content(run), config: config(run), snapshot_json: undefined, config_json: undefined },
+    teams: runTeams, participants, eligible, answerCount: submittedIds.length, submittedIds,
     answers: liveAnswers.map((answer) => ({ ...answer, selectedOptionIds: JSON.parse(answer.selected_json) as string[], selected_json: undefined })),
-    drafts: (await db.prepare("SELECT participant_id,question_index,selected_json,version,interacted FROM quiz_drafts WHERE run_id=?").bind(run.id).all<Draft>()).results.map((draft) => ({ ...draft, selectedOptionIds: JSON.parse(draft.selected_json) as string[], selected_json: undefined })),
-    corrections: await corrections(db, run.id),
-    results: await scoreResults(db, run) };
+    drafts: draftRows.map((draft) => ({ ...draft, selectedOptionIds: JSON.parse(draft.selected_json) as string[], selected_json: undefined })),
+    corrections: correctionRows, results };
 }
 
 export async function quizOwnerRoute(request: Request, db: D1Database, url: URL): Promise<Response | null> {
@@ -311,7 +327,10 @@ export async function quizOwnerRoute(request: Request, db: D1Database, url: URL)
     await tick(db, run.id);
     const fresh = (await getRun(db, run.id))!;
     const action = runMatch[2] ?? "state";
-    if (request.method === "GET" && action === "state") return json(await ownerState(db, fresh));
+    if (request.method === "GET" && action === "state") return json(await ownerState(db, fresh, {
+      includeResults: url.searchParams.get("includeResults") !== "false",
+      includeDetails: url.searchParams.get("includeDetails") !== "false",
+    }));
     if (request.method === "GET" && action === "results") return json({ run: fresh, results: await scoreResults(db, fresh) });
     if (request.method === "GET" && action === "audit") return json({ audit: (await db.prepare("SELECT id,actor,action,target_id,before_json,after_json,reason,at FROM quiz_audit WHERE run_id=? ORDER BY at,id").bind(run.id).all()).results });
     if (request.method === "GET" && action === "results.csv") return exportCsv(db, fresh);
@@ -335,7 +354,7 @@ export async function quizOwnerRoute(request: Request, db: D1Database, url: URL)
       await db.prepare("UPDATE quiz_runs SET presenter_token_hash=? WHERE id=?").bind(await sha256(token), run.id).run();
       return json({ url: new URL("/quiz/presenter/" + run.id + "#" + token, url.origin).toString() });
     }
-    if (request.method === "POST" && action === "commands") return trainerCommand(request, db, fresh);
+    if (request.method === "POST" && action === "commands") return trainerCommand(request, db, fresh, url.searchParams.get("compact") === "true");
   }
   return fail("Quiz route not found.", 404);
 }
@@ -411,14 +430,14 @@ async function tick(db: D1Database, runId: string): Promise<void> {
     return;
   }
 }
-async function trainerCommand(request: Request, db: D1Database, run: Run): Promise<Response> {
+async function trainerCommand(request: Request, db: D1Database, run: Run, compactResponse = false): Promise<Response> {
   const input = await body(request, z.object({
     kind: z.enum(["START_RUN","OPEN_QUESTION","PAUSE","RESUME","LOCK_EARLY","REVEAL_ANSWER","SHOW_LEADERBOARD","NEXT_QUESTION","END_EARLY","END_SELF_PACED","REVEAL_FINAL_RESULTS","REGRADE","VOID","DISQUALIFY"]),
     expectedRevision: z.number().int().optional(), questionIndex: z.number().int().optional(), participantId: z.string().uuid().optional(),
     correctAnswerIds: selections.optional(), correctOptionIds: selections.optional(), reason: z.string().trim().max(500).optional(),
   }));
   if (!input) return fail("Check the command.", 400);
-  if (input.kind === "REVEAL_FINAL_RESULTS" && run.state === "COMPLETED" && run.final_results_visibility === "RELEASED") return json(await ownerState(db,run));
+  if (input.kind === "REVEAL_FINAL_RESULTS" && run.state === "COMPLETED" && run.final_results_visibility === "RELEASED") return compactResponse ? json({ ok: true }) : json(await ownerState(db,run));
   if (input.expectedRevision !== undefined && input.expectedRevision !== run.revision) return fail("Run state changed. Refresh and try again.", 409);
   const now = Date.now(), last = run.current_index === content(run).questions.length - 1;
   let changed = false;
@@ -491,6 +510,7 @@ async function trainerCommand(request: Request, db: D1Database, run: Run): Promi
   if (!changed) return fail("This action is unavailable in the current Run state.", 409);
   if (!["REGRADE","VOID","DISQUALIFY","END_EARLY","END_SELF_PACED","NEXT_QUESTION","REVEAL_FINAL_RESULTS"].includes(input.kind)) await audit(db, run.id, "OWNER", input.kind, null, input.reason ?? null, { phase: run.phase }, { phase: (await getRun(db, run.id))?.phase });
   await tick(db, run.id);
+  if (compactResponse) return json({ ok: true });
   return json(await ownerState(db, (await getRun(db, run.id))!));
 }
 function correctKeyValid(question: QuizQuestion, ids: readonly string[]): boolean {
@@ -630,6 +650,9 @@ async function presenterState(db: D1Database, run: Run) {
   const reveal = run.hosting_mode === "MANUAL" && ["REVEALED","LEADERBOARD"].includes(run.phase);
   const results = (run.state === "COMPLETED" && run.final_results_visibility === "RELEASED") || run.phase === "LEADERBOARD" ? await scoreResults(db, run) : null;
   const roster = await people(db, run.id);
+  const questionStats = reveal && current
+    ? (results ?? await scoreResults(db, run)).questionStats[run.current_index] ?? null
+    : null;
   const distribution: Record<string,number> | null = reveal && current && (current.type === "SINGLE_CHOICE" || current.type === "MULTIPLE_CHOICE" || current.type === "TRUE_FALSE") ? Object.fromEntries(current.options.map((option) => [option.id,0])) : null;
   if (distribution && current) {
     const responseRows = (await db.prepare("SELECT a.selected_json FROM quiz_live_answers a JOIN quiz_run_participants p ON p.id=a.participant_id WHERE a.run_id=? AND a.question_index=? AND p.disqualified_at IS NULL").bind(run.id,run.current_index).all<{selected_json:string}>()).results;
@@ -646,7 +669,7 @@ async function presenterState(db: D1Database, run: Run) {
     teams: await teams(db, run.id), question: await projectedQuestion(db, run, current ?? null, reveal),
     upcoming: upcoming ? { hopeMultiplier: upcoming.hopeMultiplier, index: run.phase === "TRANSITION" ? run.current_index + 1 : run.current_index } : null,
     distribution,
-    questionStats:reveal&&current?(await scoreResults(db,run)).questionStats[run.current_index]??null:null,
+    questionStats,
     leaderboard: results ? run.competition_mode === "TEAM" ? results.team : results.individual : [] };
 }
 async function joinRateAllowed(db: D1Database, request: Request, secret: string | undefined): Promise<boolean> {

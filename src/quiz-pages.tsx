@@ -11,7 +11,7 @@ export { QuizBuilderPage } from "./quiz-authoring";
 type DefinitionRow = { id: string; title: string; description: string; status: string; published_version: number; draft_base_version:number|null; questionCount: number; updated_at: string };
 type ActivityRow = { id: string; title: string; state: string; join_pin: string; session_id: string | null; definition_id: string; definition_version:number; session_status?:string|null; run_count?: number };
 type DefinitionVersionRow = {version:number;content:QuizContent;created_at:string};
-type RunRow = { id: string; activity_id: string; sequence: number; name: string; definition_version:number; final_results_visibility:"HIDDEN"|"RELEASED"; run_type: "LIVE" | "SELF_PACED"; competition_mode: "INDIVIDUAL" | "TEAM" | null; hosting_mode: "MANUAL" | "AUTOMATIC" | null; scoring_mode: "ACCURACY" | "ACCURACY_SPEED" | null; state: string; phase: string; current_index: number; phase_deadline_at: number | null; phase_remaining_ms: number | null; revision: number; completion_reason: string | null; snapshot: QuizContent; config: { attemptTimerMs?: number | null; scoreReleasePolicy?: string; reviewPolicy?: string;shuffleQuestions?:boolean }; };
+type RunRow = { id: string; activity_id: string; sequence: number; name: string; definition_version:number; final_results_visibility:"HIDDEN"|"RELEASED"; run_type: "LIVE" | "SELF_PACED"; competition_mode: "INDIVIDUAL" | "TEAM" | null; hosting_mode: "MANUAL" | "AUTOMATIC" | null; scoring_mode: "ACCURACY" | "ACCURACY_SPEED" | null; state: string; phase: string; current_index: number; phase_deadline_at: number | null; phase_remaining_ms: number | null; revision: number; completion_reason: string | null; joinPin:string; snapshot: QuizContent; config: { attemptTimerMs?: number | null; scoreReleasePolicy?: string; reviewPolicy?: string;shuffleQuestions?:boolean }; };
 type Team = { id: string; name: string; sort_order: number };
 type Person = { id: string; nickname: string; team_id: string | null; joined_at: number; disqualified_at: number | null };
 type Standing = { id: string; nickname?: string; name?: string; teamId?: string | null; points?: number; correct?: number; rank?: number; members?: number; averagePoints?: number | null; averageCorrect?: number | null; dq?: boolean };
@@ -31,26 +31,55 @@ function useQuizPoll<T>(path: string | null, interval = 0, token?: string) {
   const [refreshKey, refresh] = useState(0);
   useEffect(() => {
     if (!path) return;
-    let active = true, inFlight = false;
+    const endpoint = path;
+    let active = true, inFlight = false, failures = 0, timer: number | null = null, controller: AbortController | null = null;
+    const clearTimer = () => { if (timer !== null) { window.clearTimeout(timer); timer = null; } };
+    const schedule = () => {
+      clearTimer();
+      if (!interval || !active || document.visibilityState === "hidden") return;
+      timer = window.setTimeout(() => { timer = null; void load(); }, Math.min(interval * 2 ** failures, 5000));
+    };
     async function load() {
-      if (inFlight) return;
+      if (!active || document.visibilityState === "hidden" || inFlight) return;
       inFlight = true;
+      const request = new AbortController(); controller = request;
+      let succeeded = false;
       try {
-        const result = await api<T>(path!, token ? {headers:{Authorization:"Bearer " + token}} : {});
+        const result = await api<T>(endpoint, { ...(token ? {headers:{Authorization:"Bearer " + token}} : {}), signal:request.signal });
         if (active) { setData(result); setError(""); setLoading(false); }
-      } catch (reason) { if (active) { setError(errorText(reason)); setLoading(false); } }
-      finally { inFlight = false; }
+        succeeded = true;
+      } catch (reason) { if (active && !request.signal.aborted) { setError(errorText(reason)); setLoading(false); } }
+      finally {
+        if (controller === request) controller = null;
+        inFlight = false;
+        if (succeeded) failures = 0; else if (!request.signal.aborted) failures = Math.min(failures + 1, 3);
+        schedule();
+      }
     }
     void load();
-    const timer = interval ? window.setInterval(() => void load(), interval) : null;
-    return () => { active = false; if (timer) window.clearInterval(timer); };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") { clearTimer(); controller?.abort(); }
+      else { failures = 0; void load(); }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => { active = false; clearTimer(); controller?.abort(); document.removeEventListener("visibilitychange", onVisibility); };
   }, [path, interval, token, refreshKey]);
   return { data, error, loading, refresh: () => refresh((value) => value + 1) };
 }
 function quizCrumb(current: string) { return <div className="breadcrumb"><Link to="/tools">My Tools</Link><span>›</span><Link to="/tools/quiz">Quiz</Link><span>›</span><span>{current}</span></div>; }
 function QuizNotice({ error, success }: {error?:string;success?:string}) { return <>{error && <div className="inline-error" role="alert">{error}</div>}{success && <div className="quiz-success" role="status">{success}</div>}</>; }
 function remaining(deadline: number | null, now: number) { return deadline === null ? null : Math.max(0, Math.ceil((deadline - now)/1000)); }
-function useClock() { const [now,setNow] = useState(0); useEffect(() => { const timer=window.setInterval(()=>setNow(Date.now()),250); return ()=>window.clearInterval(timer); },[]); return now; }
+function useClock() {
+  const [now,setNow] = useState(0);
+  useEffect(() => {
+    let timer:number|null=null;
+    const stop=()=>{if(timer!==null){window.clearInterval(timer);timer=null;}};
+    const start=()=>{stop();if(document.visibilityState==="hidden")return;setNow(Date.now());timer=window.setInterval(()=>setNow(Date.now()),1000);};
+    start();document.addEventListener("visibilitychange",start);
+    return ()=>{stop();document.removeEventListener("visibilitychange",start);};
+  },[]);
+  return now;
+}
 function scoreText(value: number | null | undefined) { return value === null || value === undefined ? "—" : new Intl.NumberFormat(undefined,{maximumFractionDigits:1}).format(value) + " pts"; }
 function screenQuestion(q:QuizQuestion,reveal=false):QuizScreenQuestion {
   const base={id:q.id,type:q.type,stem:q.stem,hopeMultiplier:q.hopeMultiplier};
@@ -133,23 +162,22 @@ export function QuizRunSetupPage() {
 }
 
 export function QuizConsolePage() {
-  const {runId}=useParams();const data=useQuizPoll<OwnerState>("/owner/quiz/runs/"+runId+"/state",1200);
-  const activity=useQuizPoll<{activity:ActivityRow;runs:RunRow[]}>(data.data?"/owner/quiz/activities/"+data.data.run.activity_id:null);
+  const {runId}=useParams();const data=useQuizPoll<OwnerState>("/owner/quiz/runs/"+runId+"/state?includeResults=false&includeDetails=false",1200);
   const [busy,setBusy]=useState(""),[error,setError]=useState(""),[copied,setCopied]=useState(false),[editingTeams,setEditingTeams]=useState(false),[teamNames,setTeamNames]=useState("");
   const [dqPerson,setDqPerson]=useState(""),[dqReason,setDqReason]=useState("");
   const now=useClock();
-  async function command(kind:string,extra:Record<string,unknown>={}){if(!data.data)return false;setBusy(kind);setError("");try{await post("/owner/quiz/runs/"+runId+"/commands",{kind,expectedRevision:data.data.run.revision,...extra});data.refresh();return true;}catch(reason){setError(errorText(reason));data.refresh();return false;}finally{setBusy("");}}
+  async function command(kind:string,extra:Record<string,unknown>={}){if(!data.data)return false;setBusy(kind);setError("");try{await post("/owner/quiz/runs/"+runId+"/commands?compact=true",{kind,expectedRevision:data.data.run.revision,...extra});data.refresh();return true;}catch(reason){setError(errorText(reason));data.refresh();return false;}finally{setBusy("");}}
   async function openPresenter(){setBusy("presenter");setError("");try{const result=await post<{url:string}>("/owner/quiz/runs/"+runId+"/presenter-token",{});window.open(result.url,"_blank","noopener,noreferrer");}catch(reason){setError(errorText(reason));}finally{setBusy("");}}
   async function saveTeams(){setBusy("teams");setError("");try{await api("/owner/quiz/runs/"+runId+"/teams",{method:"PUT",body:JSON.stringify({names:teamNames.split("\n").map((name)=>name.trim()).filter(Boolean)})});setEditingTeams(false);data.refresh();}catch(reason){setError(errorText(reason));data.refresh();}finally{setBusy("");}}
   if(data.loading&&!data.data)return <LoadingState label="Connecting to Quiz Console…"/>;
   if(!data.data)return <ErrorState message={data.error||"Run not found."} retry={data.refresh}/>;
   const {run,teams,participants,eligible,answerCount,results}=data.data;
-  const q=run.snapshot.questions[run.current_index], pin=activity.data?.activity.join_pin,joinUrl=window.location.origin+"/quiz/join/"+run.activity_id;
+  const q=run.snapshot.questions[run.current_index], pin=run.joinPin,joinUrl=window.location.origin+"/quiz/join/"+run.activity_id;
   const seconds=run.state==="PAUSED"?Math.ceil((run.phase_remaining_ms??0)/1000):remaining(run.phase_deadline_at,now);
   const eligibleActive=eligible.filter((id)=>!participants.find((p)=>p.id===id)?.disqualified_at);
   const canLock=eligibleActive.length>0&&eligibleActive.every((id)=>data.data!.submittedIds.includes(id));
   return <div className="page-stack quiz-console">{quizCrumb("Trainer console")}<PageIntro title={run.state==="LOBBY_OPEN"?"Quiz lobby":run.run_type==="SELF_PACED"?"Self-paced monitoring":"Trainer console"} description={run.name} action={<Button variant="secondary" to={"/quiz/activities/"+run.activity_id}>Run history</Button>}/>
-    <QuizNotice error={error||data.error||activity.error}/>
+    <QuizNotice error={error||data.error}/>
     <section className="quiz-console-banner"><div><span>{run.run_type==="LIVE"?run.competition_mode+" · "+run.hosting_mode:"SELF-PACED"} · RUN {run.sequence}</span><h2>{run.name}</h2><p>{run.state==="COMPLETED"?"Run complete":run.phase==="LOBBY"?"Participants can join now. Start when ready.":"Official Run state: "+run.phase}</p></div><Mascot kind="sun"/></section>
     <div className="quiz-console-stats"><span><Users size={20}/><strong>{participants.filter((p)=>!p.disqualified_at).length}</strong> joined</span><span><Check size={20}/><strong>{answerCount}</strong> submitted this question</span><span><Clock3 size={20}/><strong>{seconds??"—"}</strong> seconds left</span><span><strong>{run.current_index>=0?run.current_index+1:0}/{run.snapshot.questions.length}</strong> questions</span></div>
     <div className="quiz-console-grid"><div className="quiz-console-main">{run.state==="LOBBY_OPEN"&&<Card className="quiz-join-panel"><h2>Join this Run</h2><p>Share the Activity link, QR or six-digit PIN. A new Run asks everyone to join again.</p><div className="quiz-join-flex"><QRCodeSVG value={joinUrl} size={170} includeMargin/><strong className="quiz-pin">{pin?.slice(0,3)} {pin?.slice(3)}</strong></div><Button variant="secondary" onClick={async()=>{try{await navigator.clipboard.writeText(joinUrl);setCopied(true);}catch{setError("Copy is unavailable. Use the PIN above.");}}} icon={<Copy size={16}/>}>{copied?"Copied":"Copy join link"}</Button></Card>}
@@ -180,8 +208,8 @@ export function QuizResultsPage() {
   const {runId}=useParams();const data=useQuizPoll<OwnerState>("/owner/quiz/runs/"+runId+"/state");
   const audit=useQuizPoll<{audit:{id:string;actor:string;action:string;target_id:string|null;reason:string|null;at:number}[]}>("/owner/quiz/runs/"+runId+"/audit");
   const [reason,setReason]=useState(""),[error,setError]=useState(""),[busy,setBusy]=useState(""),[selectedPerson,setSelectedPerson]=useState<string|null>(null),[keys,setKeys]=useState<Record<number,string[]>>({});
-  async function correct(kind:"REGRADE"|"VOID"|"DISQUALIFY",extra:Record<string,unknown>){if(!data.data)return;setBusy(kind);setError("");try{await post("/owner/quiz/runs/"+runId+"/commands",{kind,reason:reason.trim(),...extra});setReason("");data.refresh();audit.refresh();}catch(e){setError(errorText(e));}finally{setBusy("");}}
-  async function revealFinal(){if(!data.data)return;setBusy("REVEAL_FINAL_RESULTS");setError("");try{await post("/owner/quiz/runs/"+runId+"/commands",{kind:"REVEAL_FINAL_RESULTS",expectedRevision:data.data.run.revision});data.refresh();audit.refresh();}catch(e){setError(errorText(e));}finally{setBusy("");}}
+  async function correct(kind:"REGRADE"|"VOID"|"DISQUALIFY",extra:Record<string,unknown>){if(!data.data)return;setBusy(kind);setError("");try{await post("/owner/quiz/runs/"+runId+"/commands?compact=true",{kind,reason:reason.trim(),...extra});setReason("");data.refresh();audit.refresh();}catch(e){setError(errorText(e));}finally{setBusy("");}}
+  async function revealFinal(){if(!data.data)return;setBusy("REVEAL_FINAL_RESULTS");setError("");try{await post("/owner/quiz/runs/"+runId+"/commands?compact=true",{kind:"REVEAL_FINAL_RESULTS",expectedRevision:data.data.run.revision});data.refresh();audit.refresh();}catch(e){setError(errorText(e));}finally{setBusy("");}}
   if(data.loading&&!data.data)return <LoadingState label="Loading Quiz results…"/>;
   if(!data.data)return <ErrorState message={data.error||"Results unavailable."} retry={data.refresh}/>;
   const {run,results,participants,teams,answers,drafts}=data.data;
